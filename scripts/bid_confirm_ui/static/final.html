@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>最终交付确认 · 标书确认台</title>
+  <link rel="stylesheet" href="/final.css?v=4">
+  <link rel="stylesheet" href="/workflow-shared.css?v=1">
+</head>
+<body data-page-stage="stage4">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">BS</div><div><div class="brand-name">BID MASTER</div><div class="brand-sub">标书确认台</div></div></div>
+      <div class="project-chip"><span class="pulse"></span><div><small>当前项目</small><strong id="side-project">载入中…</strong></div></div>
+      <nav class="steps">
+        <button class="step done" id="go-stage1" data-stage="stage1"><span>✓</span><div><strong>项目口径</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step done" id="go-stage2" data-stage="stage2"><span>✓</span><div><strong>标书框架</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step done" id="go-stage3" data-stage="stage3"><span>✓</span><div><strong>图片规划</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step active" data-stage="stage4"><span>04</span><div><strong>最终确认</strong><small>当前阶段</small></div></button>
+      </nav>
+      <div class="local-note"><span>●</span><div><strong>交付边界</strong><small>最终只输出1—5个Word和1个图片规划Excel。本技能不负责生图。</small></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">第四阶段 · 最终交付确认 <span id="readonly-badge" class="readonly-badge" hidden>已授权 · 只读查看</span></div><h1>确认交付物数量后开始正式编制</h1><p>请最后核对项目口径、标书框架、图片规划和交付方式。确认后，Word数量以你选择的批次为准；图片信息固定汇总为1个Excel，交给其他AI生图。</p></div>
+        <div class="metrics"><div><strong id="chapter-count">—</strong><small>一级章节</small></div><div><strong id="page-count">—</strong><small>计划页数</small></div><div><strong id="image-count">—</strong><small>规划图片</small></div></div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="summary-card project-summary"><div class="card-kicker">项目口径</div><h2 id="project-name">载入中…</h2><div class="client" id="client-name"></div><p id="project-overview"></p><button id="review-stage1">只读查看项目口径</button></article>
+        <aside class="review-summary">
+          <div class="review-heading"><div><span>前序确认</span><strong>已确认内容</strong></div><small>点击可只读回看，不会重启流程</small></div>
+          <button class="review-row" id="review-stage2"><span class="summary-icon blue">纲</span><span class="review-copy"><strong>标书框架</strong><small id="outline-summary">—</small></span><span class="review-arrow">查看 →</span></button>
+          <button class="review-row" id="review-stage3"><span class="summary-icon red">图</span><span class="review-copy"><strong>图片规划</strong><small id="image-summary">—</small></span><span class="review-arrow">查看 →</span></button>
+        </aside>
+      </section>
+
+      <section class="delivery-board">
+        <article class="delivery-card word-card">
+          <div class="delivery-head"><div><span>交付物 A</span><h2>Word技术服务标书</h2><p>选择生成批次，最终Word文件数量必须与这里一致。</p></div><div class="format-chip">.DOCX</div></div>
+          <div class="batch-selector"><strong>分几次生成？</strong><small>最少1次，最多5次</small><div class="batch-options" id="batch-options"></div></div>
+          <div class="recommendation"><span>AI建议</span><p id="batch-reason">正在计算合适批次…</p></div>
+          <div class="batch-list" id="batch-list"></div>
+          <div class="delivery-location">
+            <div class="location-copy"><strong>交付物保存位置 <em>必填</em></strong><small>每批 Word 确认交付后，将直接保存到此文件夹；项目工作区仍保留审校副本。</small></div>
+            <div class="location-actions"><button type="button" id="choose-output-folder">选择文件夹</button></div>
+            <div class="location-input"><input id="delivery-output-dir" placeholder="也可粘贴本机绝对文件夹路径"><button type="button" id="check-output-folder">校验</button></div>
+            <small class="location-state" id="delivery-output-state">尚未选择保存位置</small>
+          </div>
+        </article>
+
+        <article class="delivery-card excel-card">
+          <div class="delivery-head"><div><span>交付物 B</span><h2>图片规划Excel</h2><p>固定生成1份，作为交给其他AI生图的完整输入。</p></div><div class="format-chip green">.XLSX</div></div>
+          <div class="excel-fact"><strong>1</strong><div><b>个图片规划表</b><small id="excel-filename">—</small></div></div>
+          <div class="excel-content-summary"><strong><b id="excel-image-count">—</b> 张图片的制作要求</strong><small>每张图片对应一条记录，包含位置、表达重点和构图要求。</small></div>
+          <div class="sheet-preview"><div class="section-label">Excel 内含 <b id="excel-sheet-count">—</b> 个工作表</div><div class="sheet-list" id="excel-sheets"></div></div>
+          <div class="field-preview"><strong>每张图片会记录</strong><div class="field-chips" id="excel-columns"></div></div>
+          <div class="boundary-note"><span>!</span><p><strong>明确边界</strong>：本技能不调用生图、不输出图片文件、不插入图片。你可以把该Excel直接交给其他AI或设计工具制作图片。</p></div>
+        </article>
+      </section>
+
+      <section class="notes-card"><label for="additional-notes">最终注意事项 <span>选填</span></label><textarea id="additional-notes" rows="3" placeholder="例如：文件命名要求、优先生成的批次、需要特别保留的表述等"></textarea></section>
+    </main>
+
+    <footer class="actionbar"><div class="validation" id="validation"><span></span><div><strong>正在校验最终交付方案</strong><small>请稍候</small></div></div><button id="confirm-button" class="primary">确认方案并授权开始 <span>→</span></button></footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal" id="reopen-modal" hidden><div class="modal-card"><div class="warning-mark">!</div><h2>修改最终交付方案？</h2><p>确认后只重新开启本页。项目口径、标书框架和图片规划保持不变；此前最终授权回执将归档。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改</button></div></div></div>
+  <div class="modal" id="success-modal" hidden><div class="modal-card success-card"><div class="check">✓</div><h2>最终方案已授权</h2><p id="success-copy">交付物数量和边界已经锁定。</p><div class="next-status" id="production-status"><span class="spinner"></span>当前对话中的AI正在读取授权并初始化交付工作台</div><button id="close-success">留在当前页面检查</button></div></div>
+  <script src="/workflow-nav.js?v=1"></script>
+  <script src="/notifications.js?v=1"></script>
+  <script src="/final.js?v=9"></script>
+</body>
+</html>

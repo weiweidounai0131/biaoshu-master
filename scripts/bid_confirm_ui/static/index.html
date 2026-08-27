@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>标书确认台</title>
+  <link rel="stylesheet" href="/style.css?v=8">
+  <link rel="stylesheet" href="/workflow-shared.css?v=1">
+</head>
+<body data-page-stage="stage1">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">BS</div>
+        <div><div class="brand-name">BID MASTER</div><div class="brand-sub" id="brand-subtitle">标书确认台</div></div>
+      </div>
+      <div class="project-chip"><span class="pulse"></span><div><small>当前项目</small><strong id="side-project">载入中…</strong></div></div>
+      <nav class="steps">
+        <button class="step active" data-stage="stage1"><span>01</span><div><strong>项目口径</strong><small id="stage1-step-status">当前阶段</small></div></button>
+        <button class="step locked" id="go-stage2" data-stage="stage2"><span>02</span><div><strong>标书框架</strong><small>尚未解锁</small></div></button>
+        <button class="step locked" data-stage="stage3"><span>03</span><div><strong>图片规划</strong><small>尚未解锁</small></div></button>
+        <button class="step locked" data-stage="stage4"><span>04</span><div><strong>最终确认</strong><small>尚未解锁</small></div></button>
+      </nav>
+      <div class="privacy"><span>●</span><div><strong>本地安全模式</strong><small>资料仅在本机处理，不上传网页服务</small></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">第一阶段 · 项目口径确认</div><h1>确认这份标书要写什么</h1><p>以下内容由AI从资料中提取并结合已选标书定位生成。你可以直接修改，提交后才会进入标书框架设计。</p></div>
+        <div class="source-badge"><span id="source-count">—</span><small>份资料已纳入分析</small></div>
+      </header>
+
+      <form id="stage1-form">
+        <section class="card hero-card">
+          <div class="section-head"><div class="number">1</div><div><h2>项目与客户</h2><p>决定整本标书的项目名称、服务对象和外部表述口径</p></div><span class="ai-tag">AI 已预填</span></div>
+          <div class="grid two">
+            <label>项目名称<input name="project.project_name" required></label>
+            <label>投标主体称谓<input name="project.bidder_name"></label>
+            <label>面向客户<input name="project.customer"></label>
+            <label>实际服务对象<input name="project.service_object"></label>
+          </div>
+          <label>标书概括<textarea name="project.summary" rows="4"></textarea></label>
+          <div class="grid two">
+            <label>服务范围<textarea name="project.scope" rows="3"></textarea></label>
+            <label>服务区域<textarea name="project.region" rows="3"></textarea></label>
+            <label>服务期限<textarea name="project.service_period" rows="2"></textarea></label>
+            <label>业务目标<textarea name="project.objectives" rows="2"></textarea></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head"><div class="number">2</div><div><h2>关键口径与评分边界</h2><p>把数字、术语、评分范围和证明材料一次对齐</p></div></div>
+          <div class="grid two">
+            <label>关键数量与时限<textarea name="project.key_quantities" rows="4"></textarea></label>
+            <label>核心名词解释<textarea name="project.terminology" rows="4"></textarea></label>
+            <label>本次标书范围<textarea name="scoring.bid_scope" rows="3"></textarea></label>
+            <label>评分点概括<textarea name="scoring.summary" rows="3"></textarea></label>
+          </div>
+          <label>证明材料边界<textarea name="scoring.evidence_boundary" rows="3"></textarea></label>
+        </section>
+
+        <section class="card">
+          <div class="section-head"><div class="number">3</div><div><h2>Word排版与篇幅</h2><p>技能默认规范，可根据本次招标文件进行覆盖</p></div><button type="button" class="text-button" id="restore-format">恢复默认</button></div>
+          <div class="format-grid">
+            <label>字体<input name="formatting.font_family"></label>
+            <label>字号<input name="formatting.font_size"></label>
+            <label>目标页数<input name="formatting.target_pages" type="number" min="1" max="5000"></label>
+            <label>标题最大级数<input name="formatting.max_heading_level" type="number" min="1" max="6"></label>
+            <label class="wide">标题格式<textarea name="formatting.heading_style" rows="2"></textarea></label>
+            <label class="wide">正文格式<textarea name="formatting.body_style" rows="2"></textarea></label>
+            <label class="wide">列表格式<textarea name="formatting.list_style" rows="2"></textarea></label>
+            <label class="wide">表格格式<textarea name="formatting.table_style" rows="2"></textarea></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="section-head"><div class="number">4</div><div><h2>事实边界与补充事项</h2><p>帮助AI区分确定事实、风险事项和禁止写入内容</p></div></div>
+          <div class="boundary-grid">
+            <label class="boundary confirmed"><span>已确认事实</span><textarea name="boundaries.confirmed_facts" rows="5"></textarea></label>
+            <label class="boundary pending"><span>待确认事项</span><textarea name="boundaries.pending_items" rows="5"></textarea></label>
+            <label class="boundary forbidden"><span>禁止写入</span><textarea name="boundaries.forbidden_content" rows="5"></textarea></label>
+          </div>
+          <label class="notes">选填：本次标书的额外注意事项<textarea name="additional_notes" rows="4" placeholder="例如：某个章节需要重点写、某项承诺暂时不能作出、图片需要采用指定品牌色……"></textarea></label>
+        </section>
+      </form>
+    </main>
+
+    <footer class="actionbar">
+      <div class="save-state" id="save-state"><span></span>尚未提交，本页修改仅保存在浏览器中</div>
+      <button id="confirm-button" class="primary">确认项目口径并继续 <span>→</span></button>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="intake-modal" id="intake-modal" hidden>
+    <div class="intake-card" role="dialog" aria-modal="true" aria-labelledby="intake-title">
+      <div class="intake-accent"></div>
+      <div class="intake-brand"><span>BS</span><div><small>BID MASTER</small><strong>标书确认台</strong></div><i>本地安全模式</i></div>
+      <section id="intake-editor">
+        <div class="intake-heading">
+          <div><p>开始前确认</p><h1 id="intake-title">项目背景与本地资料</h1></div>
+          <span class="intake-local">文件仅保留本地路径</span>
+        </div>
+        <p class="intake-lead">AI已根据当前对话预填项目背景和资料路径。请一次确认；提交后将直接开始资料分析并生成第一阶段项目口径。</p>
+        <form id="intake-form">
+          <fieldset class="intake-position">
+            <legend>标书定位 <span>必选</span></legend>
+            <label><input type="radio" name="tender-position" value="main" checked><span><strong>主标</strong><small>完整、准确覆盖评分要求，沿用主标深度与篇幅规划</small></span></label>
+            <label><input type="radio" name="tender-position" value="companion"><span><strong>陪标</strong><small>默认 100 页，可调整；保留 2 至 3 个次要评分点不展开</small></span></label>
+          </fieldset>
+          <label class="intake-background">项目背景<span>必填</span><textarea id="intake-background" rows="6" required placeholder="请说明标书面向的客户、项目目标、服务范围及其他重要背景。"></textarea></label>
+          <div class="intake-materials">
+            <section class="intake-material-group background-material">
+              <div class="intake-material-head"><div><strong>背景资料 · 写作底层</strong><small>需求书、招标文件、评分表、澄清文件、客户正式资料</small></div><span id="intake-background-count">0 个路径</span></div>
+              <p class="intake-material-rule">决定项目事实、需求范围、数字、时限、评分响应和承诺边界；标书必须沿此基础撰写。</p>
+              <div class="intake-paths" id="intake-background-paths"></div>
+              <div class="intake-tools">
+                <button type="button" class="intake-choice" id="intake-choose-background-files">＋ 选择文件</button>
+                <button type="button" class="intake-choice" id="intake-choose-background-folder">＋ 选择文件夹</button>
+                <div class="intake-manual"><input id="intake-background-manual-path" placeholder="粘贴以 / 开头的本地绝对路径"><button type="button" id="intake-add-background-path">添加</button></div>
+              </div>
+            </section>
+            <section class="intake-material-group reference-material">
+              <div class="intake-material-head"><div><strong>参考资料 · 可选借鉴</strong><small>历史项目、成熟策略、公司经验或类似项目标书</small></div><span id="intake-reference-count">0 个路径</span></div>
+              <p class="intake-material-rule">只提供可选的方法与表达参考；采用前必须核对适用性，不能直接带入客户、人员、业绩、数字或承诺。</p>
+              <div class="intake-paths" id="intake-reference-paths"></div>
+              <div class="intake-tools">
+                <button type="button" class="intake-choice" id="intake-choose-reference-files">＋ 选择文件</button>
+                <button type="button" class="intake-choice" id="intake-choose-reference-folder">＋ 选择文件夹</button>
+                <div class="intake-manual"><input id="intake-reference-manual-path" placeholder="粘贴以 / 开头的本地绝对路径"><button type="button" id="intake-add-reference-path">添加</button></div>
+              </div>
+            </section>
+          </div>
+          <div class="intake-bottom">
+            <div class="intake-footnote"><span>●</span>网页不会复制或上传文件；两类资料会分开保存并交给AI按规则读取。</div>
+            <button type="submit" class="intake-submit" id="intake-submit">确认并开始分析 <span>→</span></button>
+          </div>
+        </form>
+      </section>
+      <section class="intake-analysis" id="intake-analysis" hidden>
+        <div class="analysis-orbit"><span></span><i></i></div>
+        <p class="analysis-kicker">资料已确认</p>
+        <h1>AI正在生成项目口径</h1>
+        <p>背景、背景资料与参考资料已安全回传。无需再次提交，第一阶段内容准备完成后会自动进入确认页面。</p>
+        <div class="analysis-steps">
+          <div class="done"><b>✓</b><span><strong>项目背景已接收</strong><small>已锁定本次分析范围</small></span></div>
+          <div class="done"><b>✓</b><span><strong id="analysis-material-title">本地资料路径已确认</strong><small id="analysis-material-detail">正在建立资料索引</small></span></div>
+          <div class="active"><b><i></i></b><span><strong>提取事实、评分点与排版要求</strong><small>完成后将自动进入第一阶段</small></span></div>
+        </div>
+        <div class="analysis-progress"><span></span></div>
+      </section>
+    </div>
+  </div>
+  <div class="success-modal" id="success-modal" hidden>
+    <div class="success-card"><div class="check">✓</div><h2>项目口径已确认</h2><p>确认结果已安全保存，当前对话中的AI正在读取回执并生成标书框架。完成后本页将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>正在等待AI接续处理</div><button id="close-success">留在当前页面检查</button></div>
+  </div>
+  <div class="success-modal" id="reopen-modal" hidden>
+    <div class="success-card warning-card"><div class="warning-icon">!</div><h2>从项目口径阶段重新开始？</h2><p>确认后，本页将恢复为可编辑状态，现有标书框架及其后续结果会失效并保存到历史记录。你需要重新提交项目口径，等待AI重新生成框架，不能直接回到原来的下一阶段。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认并开始修改</button></div></div>
+  </div>
+  <script src="/workflow-nav.js?v=1"></script>
+  <script src="/notifications.js?v=1"></script>
+  <script src="/app.js?v=12"></script>
+</body>
+</html>

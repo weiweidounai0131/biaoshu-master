@@ -1,0 +1,5 @@
+# Cross-host runtime dependencies for the complete bid workflow.
+# Install with: python3 scripts/install_dependencies.py
+python-docx>=1.1,<2
+openpyxl>=3.1,<4
+xlrd>=2.0,<3

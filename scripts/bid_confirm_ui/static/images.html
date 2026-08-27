@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图片规划确认 · 标书确认台</title>
+  <link rel="stylesheet" href="/images.css?v=4">
+  <link rel="stylesheet" href="/workflow-shared.css?v=3">
+</head>
+<body data-page-stage="stage3">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">BS</div>
+        <div><div class="brand-name">BID MASTER</div><div class="brand-sub">标书确认台</div></div>
+      </div>
+      <div class="project-chip"><span class="pulse"></span><div><small>当前项目</small><strong id="side-project">载入中…</strong></div></div>
+      <nav class="steps">
+        <button class="step done" id="go-stage1" data-stage="stage1"><span>✓</span><div><strong>项目口径</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step done" id="go-stage2" data-stage="stage2"><span>✓</span><div><strong>标书框架</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step active" data-stage="stage3"><span>03</span><div><strong>图片规划</strong><small>当前阶段</small></div></button>
+        <button class="step locked" id="go-stage4" data-stage="stage4"><span>04</span><div><strong>最终确认</strong><small>尚未解锁</small></div></button>
+      </nav>
+      <div class="local-note"><span>●</span><div><strong>本地规划工作台</strong><small>本阶段确认图片规划与逐图AI提示词；不生成、不插入图片</small></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">第三阶段 · 图片规划确认 <span class="readonly-badge" id="readonly-badge" hidden>已确认 · 只读查看</span></div>
+          <h1>安排每张图的位置与表达任务</h1>
+          <p id="page-help">本阶段只确认图片规划与逐图AI生图提示词，不生成、不插入图片。新增项只记录你输入的文字，不会在浏览器中调用AI。</p>
+        </div>
+        <div class="metrics">
+          <div><strong id="image-count">—</strong><small>图片总数</small></div>
+          <div><strong id="overview-count">—</strong><small>章首总览</small></div>
+          <div><strong id="located-count">—</strong><small>已定位</small></div>
+          <div class="metric-alert"><strong id="incomplete-count">—</strong><small>待完善</small></div>
+        </div>
+      </header>
+
+      <section class="ai-adjust-card" id="ai-adjust-card">
+        <div class="ai-adjust-head"><div><span class="ai-adjust-kicker">AI整体调整</span><h2>图片规划整体不合适？直接描述要怎么改</h2><p>适合调整图片数量、章节分布、统一视觉方向和每张图的表达任务。AI会基于当前规划重新生成，生成后仍需你确认。</p></div><span class="ai-adjust-badge">当前阶段</span></div>
+        <textarea id="ai-adjust-input" rows="3" placeholder="例如：减少重复的流程图，保证每个一级章节都有1张总览图；统一为简洁的蓝白信息图风格，并重新检查所有图片的放置标题和核心表达。"></textarea>
+        <div class="ai-adjust-foot"><small id="ai-adjust-status">未提交整体调整</small><button class="ai-adjust-submit" id="ai-adjust-submit" type="button">提交整体调整</button></div>
+      </section>
+
+      <section class="direction-strip">
+        <div class="direction-copy"><span class="direction-mark"></span><div><strong>统一视觉方向 · AI已预填，可修改</strong><small id="direction-summary">正在读取AI建议</small></div></div>
+        <button id="toggle-direction" aria-expanded="true">收起</button>
+      </section>
+
+      <section class="cleanup-strip" id="cleanup-strip" hidden>
+        <div class="cleanup-icon">!</div>
+        <div><strong>清理提醒</strong><div id="cleanup-actions"></div></div>
+      </section>
+
+      <section class="direction-editor" id="direction-editor">
+        <label>配色<input id="visual-palette"></label>
+        <label>风格<input id="visual-style"></label>
+        <label>背景<input id="visual-background"></label>
+        <label>信息密度<input id="visual-density"></label>
+        <label class="wide">避免的风格<textarea id="visual-avoid" rows="2" placeholder="每行一项"></textarea></label>
+      </section>
+
+      <section class="plan-board">
+        <div class="chapter-pane">
+          <div class="pane-head">
+            <div><strong>按章节查看</strong><small>图号会按章内顺序自动重排</small></div>
+            <button id="expand-groups" aria-label="全部展开">全部展开</button>
+          </div>
+          <div class="chapter-groups" id="chapter-groups"></div>
+        </div>
+
+        <div class="editor-pane" id="editor-pane">
+          <div class="empty-editor" id="empty-editor">
+            <div class="empty-graphic"><span></span><i></i></div>
+            <h2>选择一张图片</h2>
+            <p>从左侧章节清单中选择图片，在这里检查名称、放置位置、用途、核心节点和构图。</p>
+          </div>
+          <form id="image-form" hidden>
+            <div class="editor-head">
+              <div><small id="edit-figure-no">图片</small><h2 id="edit-heading">—</h2></div>
+              <div class="editor-actions"><span id="edit-state" class="state-pill">规划中</span><button type="button" class="delete" id="delete-image">删除</button></div>
+            </div>
+            <div class="editor-scroll">
+              <div class="form-grid two">
+                <label>图片名称<span>必填</span><input id="edit-name" required></label>
+                <label>图片类型<span>必填</span><select id="edit-type"></select></label>
+                <label>所属一级章节<span>必填</span><select id="edit-chapter"></select></label>
+                <label>放置到标题<span>必填</span><select id="edit-position-node"></select></label>
+                <label>画面方向<select id="edit-orientation"><option value="landscape">横版</option><option value="portrait">竖版</option><option value="square">方形</option><option value="auto">根据内容确定</option></select></label>
+              </div>
+              <label>具体放置说明<span>必填</span><textarea id="edit-placement" rows="2" placeholder="例如：一级章节导语后、首个二级标题前"></textarea></label>
+              <label>用途 / 核心表达<span>必填</span><textarea id="edit-purpose" rows="3" placeholder="这张图帮助评审人快速理解什么"></textarea></label>
+              <label>核心节点<span>至少1项，每行一项</span><textarea id="edit-nodes" rows="6" placeholder="总体目标&#10;标准化建设&#10;常态化运营"></textarea></label>
+              <label>构图建议<span>必填</span><textarea id="edit-composition" rows="4" placeholder="说明画面结构、主次层级、节点关系与箭头走向"></textarea></label>
+              <label class="overview-switch"><span><strong>设为章首总览图</strong><small>通常放在一级章节导语后、首个二级标题前</small></span><input id="edit-overview" type="checkbox"><i></i></label>
+            </div>
+            <div class="editor-foot"><span id="editor-hint">保存后会同步更新左侧清单和校验状态</span><button type="button" id="save-image">保存本张修改</button></div>
+          </form>
+        </div>
+      </section>
+      <section class="load-error" id="load-error" hidden>
+        <div>!</div><h2>图片规划尚未准备好</h2><p id="load-error-message">当前对话中的AI正在读取已确认的标书框架并生成第三阶段推荐数据；完成后请重新检查。</p><button id="retry-load">重新检查</button>
+      </section>
+    </main>
+
+    <footer class="actionbar">
+      <div class="validation" id="validation"><span></span><div><strong>正在校验图片规划</strong><small>请稍候</small></div></div>
+      <button id="confirm-button" class="primary">确认图片规划并继续 <span>→</span></button>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal" id="reopen-modal" hidden>
+    <div class="modal-card warning-card" role="dialog" aria-modal="true" aria-labelledby="reopen-title">
+      <div class="warning-mark">!</div>
+      <h2 id="reopen-title">从图片规划阶段重新开始？</h2>
+      <p>确认后，当前图片规划回执及最终确认等下游结果会归档。项目口径和标书框架保持不变，本阶段将恢复为可编辑状态。</p>
+      <div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改并重新开始</button></div>
+    </div>
+  </div>
+  <div class="modal" id="success-modal" hidden>
+    <div class="modal-card success-card"><div class="check">✓</div><h2>图片规划已确认</h2><p>确认结果已保存。AI将读取本阶段回执并准备下一阶段；页面只会在下一阶段等待点已就绪后自动切换。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>确认已保存，正在等待AI接续处理…</div><button id="close-success">留在当前页面检查</button></div>
+  </div>
+  <script src="/workflow-nav.js?v=1"></script>
+  <script src="/notifications.js?v=1"></script>
+  <script src="/images.js?v=9"></script>
+</body>
+</html>

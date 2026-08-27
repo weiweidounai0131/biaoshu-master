@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>生产与审校台 · 标书</title>
+  <link rel="stylesheet" href="/reader.css">
+  <link rel="stylesheet" href="/review.css?v=2">
+  <link rel="stylesheet" href="/reader-overrides.css?v=2">
+  <link rel="stylesheet" href="/reader-scale.css?v=3">
+  <link rel="stylesheet" href="/reader-editable.css?v=2">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">BS</span><div><span class="brand-en">BID MASTER</span><strong>标书审校台</strong></div></div>
+    <div class="project-card"><span class="signal"></span><p>当前项目</p><strong id="project-name">正在读取项目</strong></div>
+    <nav class="stages" aria-label="生产审校阶段">
+      <div class="stage complete stage-link" data-stage="stage1"><span>✓</span><div><strong>项目口径</strong><small>已确认 · 只读回看</small></div></div>
+      <div class="stage complete stage-link" data-stage="stage2"><span>✓</span><div><strong>标书框架</strong><small>已确认 · 只读回看</small></div></div>
+      <div class="stage complete stage-link" data-stage="stage3"><span>✓</span><div><strong>图片规划</strong><small>已确认 · 只读回看</small></div></div>
+      <div class="stage active"><span>04</span><div><strong>生产与审校</strong><small>当前阶段</small></div></div>
+    </nav>
+    <div class="sidebar-note"><b>本地审校</b><p>正文、列表和表格均可直接修改；需要判断的改写会保存为 AI 修改请求，不在浏览器调用模型。</p></div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div><p class="eyebrow">第四阶段 · 生产与审校</p><h1>查看交付进度与已生成内容</h1><p class="subtitle">按批次浏览结构化正文。页面不调用 AI，也不会修改任何文件。</p></div>
+      <div class="metrics"><div><b id="metric-batches">—</b><small>Word批次</small></div><div><b id="metric-pages">—</b><small>计划页数</small></div><div><b id="metric-images">—</b><small>规划图片</small></div></div>
+    </header>
+
+    <section class="summary-card compact-summary">
+      <div class="summary-copy"><p class="section-label">项目概览</p><h2 id="project-title">正在读取交付授权</h2><p id="project-overview">本地交付清单加载后将在此展示项目概述。</p><span id="project-client" class="client-tag"></span></div>
+      <div class="readonly-pill">只读查看</div>
+    </section>
+
+    <section class="delivery-layout">
+      <div class="batch-panel card">
+        <div class="panel-head"><div><h2>Word批次</h2><p>仅已生成批次可以进入正文阅读。</p></div><span id="delivery-status" class="status-badge">读取中</span></div>
+        <div id="batch-list" class="batch-list" aria-live="polite"></div>
+        <button id="view-image-plan" class="batch-card excel-batch-card" type="button"><span class="batch-number excel-icon">X</span><span id="excel-state" class="batch-state">读取中</span><h3>图片规划 Excel</h3><p id="excel-status">读取中</p></button>
+        <div class="final-delivery-action"><p id="final-action-note">正在核验全部交付物状态…</p><button id="confirm-final" class="button-primary" type="button" disabled>确认全部交付</button></div>
+      </div>
+
+      <div class="reader-panel card">
+        <div class="reader-head"><div><p class="section-label">结构化源稿 · 本地审校</p><h2 id="reader-title">请选择已生成的 Word 批次</h2><p id="reader-meta">未生成的批次不会加载正文。</p><p id="reader-validation" class="validation-info" hidden></p><div id="wps-page-check" class="wps-page-check" hidden><span id="wps-page-note"></span><input id="wps-actual-pages" type="number" min="1" inputmode="numeric" aria-label="WPS实际页数"><button id="save-wps-pages" type="button">登记页数</button></div></div><span id="reader-version" class="version-tag" hidden></span></div>
+        <div id="reader-empty" class="reader-empty"><span>文</span><h3>暂无可阅读正文</h3><p>当前仅展示已完成本地校验的批次。生成并登记源稿后，该批正文会出现在这里。</p></div>
+        <article id="reader-content" class="reader-content" hidden></article>
+        <div id="reader-footer" class="reader-footer" hidden><span id="reader-progress"></span><div class="reader-actions"><button id="load-more" type="button">展开更多内容</button><button id="confirm-batch" class="button-primary" type="button" hidden>确认并交付本批 Word</button><button id="confirm-image-plan" class="button-primary" type="button" hidden>确认并交付图片规划 Excel</button></div></div>
+      </div>
+      <aside class="revision-panel card">
+        <div class="revision-head"><p id="revision-kicker" class="section-label">右侧 · 修改面板</p><h2 id="revision-title">对当前正文提出修改</h2><p id="revision-target">请先在中间内容区选择一段正文。</p></div>
+        <div id="revision-empty" class="revision-empty"><span>✎</span><strong>尚未选择可编辑内容</strong><p>选择中间任一正文、列表或表格后，可直接改写，或提交给当前 AI 处理。</p></div>
+        <div id="revision-form" class="revision-form" hidden>
+          <label for="revision-mode">修改方式</label>
+          <select id="revision-mode"><option value="direct">人工直接修改（不调用 AI）</option><option value="ai">AI 整段改写</option></select>
+          <label id="revision-label" for="revision-text">修改后的正文</label>
+          <textarea id="revision-text" rows="12" placeholder="输入修改后的完整正文，保存后本批 Word 将进入待重新导出状态。"></textarea>
+          <p id="revision-help" class="revision-help">人工直接修改会立即保存并本地重导出；只有 AI 改写才会向当前对话提交请求。</p>
+          <button id="submit-revision" class="button-primary" type="button">保存直接修改</button>
+        </div>
+        <div id="excel-revision-form" class="revision-form" hidden>
+          <div id="excel-position-context" class="excel-position-context"></div>
+          <label for="excel-revision-mode">修改方式</label>
+          <select id="excel-revision-mode"><option value="direct">人工直接修改（不调用 AI）</option><option value="ai">AI 改写当前图片规划</option></select>
+          <div id="excel-direct-fields">
+            <label for="excel-name">图片名称</label><input id="excel-name" type="text" maxlength="120">
+            <label for="excel-type">图片类型</label><input id="excel-type" type="text" maxlength="80">
+            <label for="excel-purpose">用途 / 核心表达</label><textarea id="excel-purpose" rows="4"></textarea>
+            <label for="excel-core-nodes">核心节点（每行一项）</label><textarea id="excel-core-nodes" rows="4"></textarea>
+            <label for="excel-composition">构图建议</label><textarea id="excel-composition" rows="4"></textarea>
+            <label for="excel-orientation">画面方向</label><select id="excel-orientation"><option value="landscape">横向</option><option value="portrait">纵向</option><option value="square">方形</option><option value="auto">自适应</option></select>
+            <label for="excel-placement-note">具体放置说明</label><textarea id="excel-placement-note" rows="3"></textarea>
+            <label class="check-label"><input id="excel-overview" type="checkbox"> 设为章节总览图</label>
+          </div>
+          <div id="excel-ai-fields" hidden><label for="excel-ai-instruction">希望 AI 如何改写当前图片规划</label><textarea id="excel-ai-instruction" rows="7" placeholder="例如：保留放置位置，将图片改为更清晰的横向闭环图，突出问题识别、实施动作和验收指标。"></textarea></div>
+          <p id="excel-revision-help" class="revision-help">人工修改会立即保存并本地重导出，不会唤醒 AI。</p>
+          <button id="save-image-plan" class="button-primary" type="button">保存图片规划修改并重导出</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/reader.js?v=11"></script>
+</body>
+</html>

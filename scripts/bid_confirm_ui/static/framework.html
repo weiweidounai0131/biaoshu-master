@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>标书框架确认 · 标书确认台</title>
+  <link rel="stylesheet" href="/framework.css?v=7">
+  <link rel="stylesheet" href="/workflow-shared.css?v=3">
+</head>
+<body data-page-stage="stage2">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">BS</div><div><div class="brand-name">BID MASTER</div><div class="brand-sub">标书确认台</div></div></div>
+      <div class="project-chip"><span class="pulse"></span><div><small>当前项目</small><strong id="side-project">载入中…</strong></div></div>
+      <nav class="steps">
+        <button class="step done" id="back-stage1" data-stage="stage1"><span>✓</span><div><strong>项目口径</strong><small>已确认 · 只读回看</small></div></button>
+        <button class="step active" data-stage="stage2"><span>02</span><div><strong>标书框架</strong><small>当前阶段</small></div></button>
+        <button class="step locked" id="go-stage3" data-stage="stage3"><span>03</span><div><strong>图片规划</strong><small id="stage3-step-status">尚未解锁</small></div></button>
+        <button class="step locked" data-stage="stage4"><span>04</span><div><strong>最终确认</strong><small>尚未解锁</small></div></button>
+      </nav>
+      <div class="legend"><strong>框架显示说明</strong><p>页面完整保留一级至三级标题。四至六级由AI在获授权的三级节点下自然细化。</p><div><span class="dot l1"></span>一级章节</div><div><span class="dot l2"></span>二级标题</div><div><span class="dot l3"></span>三级标题</div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">第二阶段 · 标书框架确认 <span class="readonly-badge" id="readonly-badge" hidden>已确认 · 只读查看</span></div><h1>调整目录结构与篇幅预算</h1><p id="stage2-help">点击任意节点可在右侧编辑；拖动同级节点可以排序。页面仅展示到三级，标题层级不追求机械对齐。</p></div>
+        <div class="metrics">
+          <div><strong id="chapter-count">—</strong><small>一级章节</small></div>
+          <div><strong id="heading-count">—</strong><small>标题节点</small></div>
+          <div><strong id="score-coverage">—</strong><small>评分覆盖</small></div>
+        </div>
+      </header>
+
+      <section class="budget-strip">
+        <div class="budget-text"><span>篇幅预算</span><strong><b id="planned-pages">—</b> / <i id="target-pages">—</i> 页</strong></div>
+        <div class="progress"><span id="page-progress"></span></div>
+        <div class="budget-status" id="budget-status">正在计算</div>
+        <button class="rebalance-button" id="rebalance-open" type="button">重新调整</button>
+      </section>
+
+      <section class="ai-adjust-card" id="ai-adjust-card">
+        <div class="ai-adjust-head"><div><span class="ai-adjust-kicker">AI整体调整</span><h2>目录整体不合适？直接描述要怎么改</h2><p>适合调整章节数量、目录层级、评分映射和篇幅分配。AI会以当前页面内容为基础重新生成，生成后仍需你确认。</p></div><span class="ai-adjust-badge">当前阶段</span></div>
+        <textarea id="ai-adjust-input" rows="3" placeholder="例如：当前目录只有3个一级章节，请结合项目需求拆成6个一级章节；保留评分点覆盖，重新分配各章页数，并让每章下的二、三级标题完整可写。"></textarea>
+        <div class="ai-adjust-foot"><small id="ai-adjust-status">未提交整体调整</small><button class="ai-adjust-submit" id="ai-adjust-submit" type="button">提交整体调整</button></div>
+      </section>
+
+      <section class="chapter-tabs" id="chapter-tabs"></section>
+
+      <section class="map-shell">
+        <div class="map-toolbar">
+          <div><strong id="active-title">—</strong><span id="active-meta">—</span></div>
+          <div class="toolbar-actions"><button id="collapse-all">全部收起</button><button id="expand-all">全部展开</button><button class="add" id="add-section">＋ 添加二级标题</button></div>
+        </div>
+        <div class="mindmap" id="mindmap"></div>
+      </section>
+    </main>
+
+    <aside class="drawer" id="drawer" aria-hidden="true">
+      <div class="drawer-head"><div><small id="drawer-level">标题节点</small><h2 id="drawer-number">—</h2></div><button id="drawer-close">×</button></div>
+      <div class="drawer-body">
+        <label>标题名称<textarea id="edit-title" rows="3"></textarea></label>
+        <label id="pages-field">章节预计页数<input id="edit-pages" type="number" min="0" max="5000"></label>
+        <label>对应评分点<textarea id="edit-scores" rows="3" placeholder="每行一个评分点"></textarea></label>
+        <label>对应需求条款<textarea id="edit-requirements" rows="3" placeholder="每行一个需求条款"></textarea></label>
+        <label class="switch-row"><span><strong>允许继续细化</strong><small>正文写作时可在此节点下自然拆分四至六级标题</small></span><input id="edit-deeper" type="checkbox"><i></i></label>
+        <div class="node-actions"><button id="move-up">上移</button><button id="move-down">下移</button><button id="add-child">添加下级</button><button class="danger" id="delete-node">删除节点</button></div>
+      </div>
+      <div class="drawer-foot"><button id="cancel-edit">取消</button><button class="primary" id="save-edit">保存修改</button></div>
+    </aside>
+
+    <footer class="actionbar">
+      <div class="validation" id="validation"><span></span><div><strong>正在校验框架</strong><small>请稍候</small></div></div>
+      <button id="confirm-button" class="primary large">确认标书框架并继续 <span>→</span></button>
+    </footer>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="success-modal" id="success-modal" hidden><div class="success-card"><div class="check">✓</div><h2>标书框架已确认</h2><p>目录结构、顺序、篇幅和评分映射已安全保存。当前对话中的AI正在读取回执并生成图片规划，完成后页面将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>正在等待AI接续处理</div><button id="close-success">留在当前页面检查</button></div></div>
+  <div class="success-modal" id="reopen-modal" hidden>
+    <div class="success-card warning-card">
+      <div class="warning-mark">!</div>
+      <h2>确认修改本阶段？</h2>
+      <p>重新开启后，原标书框架确认结果将归档，本阶段恢复为可编辑状态。后续阶段需要基于修改后的框架重新开始。</p>
+      <div class="warning-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改并重新开始</button></div>
+    </div>
+  </div>
+  <div class="success-modal" id="rebalance-modal" hidden>
+    <div class="success-card rebalance-card">
+      <div class="rebalance-heading"><div><div class="rebalance-kicker">篇幅预算重新分配</div><h2>调整一级章节页数</h2></div><div class="rebalance-total"><strong id="rebalance-total-pages">-</strong><span>页 / <span id="rebalance-chapter-count">-</span> 个章节</span></div></div>
+      <p>拖动章节间的把手，每次稳定转移 1 页。章节总页数不变，每章至少保留 1 页。</p>
+      <div class="rebalance-track-wrap"><div class="rebalance-track" id="rebalance-track" aria-label="一级章节页数分配"></div><div class="rebalance-hint" id="rebalance-hint">选择章节之间的把手开始调整</div></div>
+      <div class="rebalance-actions"><button id="rebalance-cancel" type="button">取消</button><button class="danger-confirm" id="rebalance-confirm" type="button">确认并重新生成</button></div>
+      <div class="rebalance-status" id="rebalance-status" hidden><span class="spinner"></span>AI正在依据新的页数重新分配二、三级标题…</div>
+    </div>
+  </div>
+  <script src="/workflow-nav.js?v=1"></script>
+  <script src="/notifications.js?v=1"></script>
+  <script src="/framework.js?v=9"></script>
+</body>
+</html>
