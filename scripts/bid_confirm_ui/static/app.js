@@ -217,8 +217,7 @@ async function pollSession() {
 function setNextStageStatus(message, warning = false) {
   const node = $("#next-stage-status");
   if (!node) return;
-  node.innerHTML = warning ? message : `<span class="spinner"></span>${message}`;
-  node.classList.toggle("wait-warning", warning);
+  window.BiaoshuWorkflow.setStatus(node, message, warning);
 }
 
 function stopStageWait() {

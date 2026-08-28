@@ -41,3 +41,9 @@
 .ai-adjust-submit:active{transform:translateY(0) scale(.985)}
 .ai-adjust-submit:disabled{opacity:.52;cursor:not-allowed;transform:none;box-shadow:none}
 @media(max-width:700px){.ai-adjust-card{padding:15px 14px 13px}.ai-adjust-head{display:block}.ai-adjust-badge{display:inline-block;margin-top:10px}.ai-adjust-head h2{font-size:17px}.ai-adjust-foot{align-items:stretch;flex-direction:column}.ai-adjust-foot small{white-space:normal}.ai-adjust-submit{width:100%;padding:10px 14px}}
+
+/* Shared status spinner: keep the DOM node stable while polling updates only the copy. */
+.spinner { display: inline-block; width: 14px; height: 14px; flex: 0 0 14px; margin-right: 8px; vertical-align: -2px; border: 2px solid rgba(35,92,166,.18); border-top-color: var(--blue,#235ca6); border-right-color: var(--blue,#235ca6); border-radius: 50%; animation: biaoshu-spinner-rotate .8s linear infinite; will-change: transform; }
+.status-copy { display: inline; }
+@keyframes biaoshu-spinner-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media(prefers-reduced-motion:reduce){.spinner{animation-duration:1.6s}}

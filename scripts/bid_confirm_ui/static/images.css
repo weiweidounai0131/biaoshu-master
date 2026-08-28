@@ -202,8 +202,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .modal-card h2 { margin: 18px 0 8px; }
 .modal-card p { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .success-card .next-status { margin: 20px 0; padding: 13px; border-radius: 10px; background: #f5f7fb; color: #555b70; font-size: 13px; }
-.success-card .spinner { display: inline-block; width: 13px; height: 13px; margin-right: 8px; vertical-align: -2px; border: 2px solid #ccd2df; border-top-color: var(--blue); border-radius: 50%; animation: stage3-spin 1s linear infinite; }
-@keyframes stage3-spin { to { transform: rotate(360deg); } }
 .warning-mark, .check { width: 54px; height: 54px; margin: auto; display: grid; place-items: center; border-radius: 50%; color: #fff; font-size: 27px; font-weight: 850; }
 .warning-mark { background: var(--red); }
 .check { background: var(--green); }

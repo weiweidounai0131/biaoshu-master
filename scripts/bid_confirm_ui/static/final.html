@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>最终交付确认 · 标书确认台</title>
   <link rel="stylesheet" href="/final.css?v=4">
-  <link rel="stylesheet" href="/workflow-shared.css?v=1">
+  <link rel="stylesheet" href="/workflow-shared.css?v=2">
 </head>
 <body data-page-stage="stage4">
   <div class="app-shell">
@@ -69,8 +69,9 @@
   <div class="toast" id="toast"></div>
   <div class="modal" id="reopen-modal" hidden><div class="modal-card"><div class="warning-mark">!</div><h2>修改最终交付方案？</h2><p>确认后只重新开启本页。项目口径、标书框架和图片规划保持不变；此前最终授权回执将归档。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改</button></div></div></div>
   <div class="modal" id="success-modal" hidden><div class="modal-card success-card"><div class="check">✓</div><h2>最终方案已授权</h2><p id="success-copy">交付物数量和边界已经锁定。</p><div class="next-status" id="production-status"><span class="spinner"></span>当前对话中的AI正在读取授权并初始化交付工作台</div><button id="close-success">留在当前页面检查</button></div></div>
+  <script src="/workflow-shared.js?v=1"></script>
   <script src="/workflow-nav.js?v=1"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/final.js?v=9"></script>
+  <script src="/final.js?v=10"></script>
 </body>
 </html>

@@ -46,7 +46,7 @@ function toast(message, error = false) {
 function setNextStageStatus(message, warning = false) {
   const node = $("#next-stage-status");
   if (!node) return;
-  node.innerHTML = warning ? `<span>!</span>${message}` : `<span class="spinner"></span>${message}`;
+  window.BiaoshuWorkflow.setStatus(node, message, warning);
 }
 
 function stopNextWait() {
