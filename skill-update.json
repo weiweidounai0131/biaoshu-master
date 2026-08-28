@@ -1,5 +1,11 @@
 {
   "schema_version": 1,
-  "repository": "https://github.com/weiweidounai0131/biaoshu-master.git",
+  "name": "biaoshu-master",
+  "version_file": "skill-version.json",
+  "version_urls": [
+    "https://raw.githubusercontent.com/weiweidounai0131/biaoshu-master/main/skill-version.json"
+  ],
+  "download_url": "https://github.com/weiweidounai0131/biaoshu-master/archive/refs/heads/main.zip",
+  "repository": "https://github.com/weiweidounai0131/biaoshu-master",
   "branch": "main"
 }

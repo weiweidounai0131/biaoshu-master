@@ -1,31 +1,45 @@
 #!/usr/bin/env python3
-"""Check, and only after explicit approval pull, a GitHub skill update.
+"""Check for a public biaoshu-master version and optionally update the package.
 
-The command supports both a Git checkout and a ZIP-installed skill package.
-ZIP packages do not contain ``.git``; they use ``skill-update.json`` plus a
-shallow clone of the configured remote for content comparison. The calling
-AI must ask the user before passing ``--update``; this script never auto-updates
-a skill.
+The check is deliberately based on a small semantic-version manifest rather
+than on Git metadata. This keeps the same behavior for Git checkouts and ZIP
+installations, including packages installed by hosts that do not preserve a
+``.git`` directory. The script never updates automatically: ``--update`` is
+only for an explicit user-approved update.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
+import io
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
-from pathlib import Path
-from typing import Any
+import zipfile
+from pathlib import Path, PurePosixPath
+from typing import Any, Optional
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 DEFAULT_REPOSITORY = "https://github.com/weiweidounai0131/biaoshu-master.git"
 DEFAULT_BRANCH = "main"
+DEFAULT_VERSION_FILE = "skill-version.json"
 UPDATE_CONFIG_NAME = "skill-update.json"
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 64 * 1024 * 1024
+
 IGNORED_PACKAGE_DIRS = {".git", "__pycache__", "evals", "bid_delivery", "outputs"}
 IGNORED_PACKAGE_FILES = {".DS_Store"}
+PRESERVED_LOCAL_DIRS = {"evals", "bid_delivery", "outputs"}
+
+_SEMVER_RE = re.compile(r"^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$")
 
 
 def _run(skill_dir: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -36,25 +50,8 @@ def _run(skill_dir: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 127, "", str(exc))
 
 
-def _run_git(*arguments: str) -> subprocess.CompletedProcess[str]:
-    command = ["git", *arguments]
-    try:
-        return subprocess.run(command, capture_output=True, text=True, check=False)
-    except OSError as exc:
-        return subprocess.CompletedProcess(command, 127, "", str(exc))
-
-
 def _output(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stdout or "").strip()
-
-
-def _error_kind(result: subprocess.CompletedProcess[str]) -> str:
-    text = ((result.stderr or "") + " " + (result.stdout or "")).lower()
-    if "could not resolve host" in text or "network is unreachable" in text or "failed to connect" in text:
-        return "network_unreachable"
-    if "authentication" in text or "permission denied" in text or "repository not found" in text:
-        return "remote_authentication_failed"
-    return "git_command_failed"
 
 
 def _base(skill_dir: Path) -> dict[str, Any]:
@@ -66,133 +63,306 @@ def _base(skill_dir: Path) -> dict[str, Any]:
     }
 
 
-def _load_update_config(skill_dir: Path) -> tuple[str, str]:
-    """Load the remote used by ZIP installs, with a safe built-in fallback."""
+def _safe_relative_path(value: Any, fallback: str) -> str:
+    candidate = str(value or fallback).strip().replace("\\", "/")
+    path = PurePosixPath(candidate)
+    if not candidate or path.is_absolute() or ".." in path.parts:
+        return fallback
+    return path.as_posix()
+
+
+def _github_raw_url(repository: str, branch: str, relative_path: str) -> Optional[str]:
+    match = re.match(
+        r"^https?://github\.com/([^/]+)/([^/#]+?)(?:\.git)?/?$",
+        repository,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    owner, repo = match.groups()
+    encoded_branch = urllib_parse.quote(branch, safe="")
+    encoded_path = urllib_parse.quote(relative_path, safe="/")
+    return "https://raw.githubusercontent.com/{}/{}/{}/{}".format(
+        owner,
+        repo,
+        encoded_branch,
+        encoded_path,
+    )
+
+
+def _github_archive_url(repository: str, branch: str) -> Optional[str]:
+    match = re.match(
+        r"^https?://github\.com/([^/]+)/([^/#]+?)(?:\.git)?/?$",
+        repository,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    owner, repo = match.groups()
+    encoded_branch = urllib_parse.quote(branch, safe="")
+    return "https://github.com/{}/{}/archive/refs/heads/{}.zip".format(owner, repo, encoded_branch)
+
+
+def _load_update_config(skill_dir: Path) -> dict[str, Any]:
+    """Read public update metadata and retain safe defaults for old packages."""
+    data: dict[str, Any] = {}
     path = skill_dir / UPDATE_CONFIG_NAME
-    if not path.is_file():
-        return DEFAULT_REPOSITORY, DEFAULT_BRANCH
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError, TypeError):
+            data = {}
+
+    repository = str(data.get("repository") or data.get("remote_url") or DEFAULT_REPOSITORY).strip()
+    branch = str(data.get("branch") or DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
+    version_file = _safe_relative_path(data.get("version_file"), DEFAULT_VERSION_FILE)
+
+    urls: list[str] = []
+    configured_urls = data.get("version_urls")
+    if isinstance(configured_urls, list):
+        for value in configured_urls:
+            url = str(value or "").strip()
+            if url.startswith("https://") and url not in urls:
+                urls.append(url)
+    if not urls:
+        derived = _github_raw_url(repository, branch, version_file)
+        if derived:
+            urls.append(derived)
+
+    download_url = str(data.get("download_url") or "").strip()
+    if not download_url:
+        download_url = _github_archive_url(repository, branch) or ""
+
+    return {
+        "schema_version": data.get("schema_version", 1),
+        "name": str(data.get("name") or "biaoshu-master").strip(),
+        "repository": repository or DEFAULT_REPOSITORY,
+        "branch": branch,
+        "version_file": version_file,
+        "version_urls": urls,
+        "download_url": download_url,
+    }
+
+
+def _parse_version(value: Any) -> Optional[tuple[int, int, int]]:
+    match = _SEMVER_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def _read_manifest_version(path: Path) -> Optional[str]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
-        return DEFAULT_REPOSITORY, DEFAULT_BRANCH
+        return None
     if not isinstance(data, dict):
-        return DEFAULT_REPOSITORY, DEFAULT_BRANCH
-    repository = str(data.get("repository") or data.get("remote_url") or DEFAULT_REPOSITORY).strip()
-    branch = str(data.get("branch") or DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
-    return repository or DEFAULT_REPOSITORY, branch
+        return None
+    version = str(data.get("version") or data.get("latest_version") or "").strip()
+    return version if _parse_version(version) else None
 
 
-def _package_files(root: Path) -> list[tuple[str, Path]]:
-    files: list[tuple[str, Path]] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.name in IGNORED_PACKAGE_FILES:
-            continue
-        relative = path.relative_to(root)
-        if any(part in IGNORED_PACKAGE_DIRS for part in relative.parts):
-            continue
-        files.append((relative.as_posix(), path))
-    return sorted(files, key=lambda item: item[0])
+def _local_version(skill_dir: Path, config: dict[str, Any]) -> tuple[str, str, Optional[str]]:
+    version_file = skill_dir / str(config["version_file"])
+    if version_file.is_file():
+        version = _read_manifest_version(version_file)
+        if version:
+            return version, str(version_file), None
+        return "", str(version_file), "local_version_invalid"
+
+    package_file = skill_dir / "package.json"
+    if package_file.is_file():
+        version = _read_manifest_version(package_file)
+        if version:
+            return version, str(package_file), None
+        return "", str(package_file), "local_version_invalid"
+
+    # Packages created before the version manifest existed can still bootstrap
+    # from the public latest package; 0.0.0 makes that intent explicit.
+    return "0.0.0", "legacy_default", None
 
 
-def _package_sha256(root: Path) -> str:
-    """Return a deterministic package digest without requiring Git metadata."""
-    digest = hashlib.sha256()
-    for relative, path in _package_files(root):
-        content_digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(content_digest.encode("ascii"))
-        digest.update(b"\n")
-    return digest.hexdigest()
-
-
-def _remote_head(repository: str, branch: str) -> tuple[str, subprocess.CompletedProcess[str]]:
-    result = _run_git("ls-remote", repository, f"refs/heads/{branch}")
-    line = next((line for line in _output(result).splitlines() if line.strip()), "")
-    remote_sha = line.split()[0] if line else ""
-    return remote_sha, result
-
-
-def _clone_remote(repository: str, branch: str):
-    holder = tempfile.TemporaryDirectory(prefix="biaoshu-master-update-")
-    target = Path(holder.name) / "package"
-    result = _run_git("clone", "--depth", "1", "--no-tags", "--branch", branch, repository, str(target))
-    if result.returncode != 0 or not target.is_dir():
-        holder.cleanup()
-        return None, None, result
-    return holder, target, result
-
-
-def _package_check(skill_dir: Path) -> dict[str, Any]:
-    """Check a ZIP install by comparing its files with the remote branch."""
-    repository, branch = _load_update_config(skill_dir)
-    result = _base(skill_dir)
-    result.update(
-        {
-            "remote_provider": "github" if re.search(r"github\.com", repository, re.IGNORECASE) else "git",
-            "repository": repository,
-            "branch": branch,
-            "install_type": "package",
-            "local_package_sha256": _package_sha256(skill_dir),
-        }
+def _fetch_json(url: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    request = urllib_request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "biaoshu-master-update-check/1",
+        },
     )
-    remote_sha, remote_result = _remote_head(repository, branch)
-    if not remote_sha:
-        result.update({"status": "check_failed", "reason": _error_kind(remote_result)})
-        return result
-    holder, remote_dir, clone_result = _clone_remote(repository, branch)
-    if not holder or not remote_dir:
-        result.update({"status": "check_failed", "reason": _error_kind(clone_result or remote_result)})
-        return result
     try:
-        remote_package_sha = _package_sha256(remote_dir)
-    finally:
-        holder.cleanup()
-    result.update({"remote_sha": remote_sha, "remote_package_sha256": remote_package_sha})
-    result["status"] = "up_to_date" if result["local_package_sha256"] == remote_package_sha else "update_available"
-    return result
+        with urllib_request.urlopen(request, timeout=10) as response:
+            payload = response.read(MAX_MANIFEST_BYTES + 1)
+        if len(payload) > MAX_MANIFEST_BYTES:
+            return None, "manifest_too_large"
+        data = json.loads(payload.decode("utf-8"))
+        if not isinstance(data, dict):
+            return None, "manifest_not_object"
+        return data, None
+    except urllib_error.HTTPError as exc:
+        return None, "http_{}".format(exc.code)
+    except urllib_error.URLError:
+        return None, "network_unreachable"
+    except (OSError, TimeoutError, UnicodeError, ValueError):
+        return None, "manifest_read_failed"
+
+
+def _fetch_remote_version(urls: list[str]) -> tuple[Optional[str], Optional[str], list[dict[str, str]]]:
+    errors: list[dict[str, str]] = []
+    for url in urls:
+        data, reason = _fetch_json(url)
+        if data is None:
+            errors.append({"url": url, "reason": reason or "manifest_read_failed"})
+            continue
+        version = str(data.get("version") or data.get("latest_version") or "").strip()
+        if not _parse_version(version):
+            errors.append({"url": url, "reason": "remote_version_invalid"})
+            continue
+        return version, url, errors
+    return None, None, errors
+
+
+def _install_type(skill_dir: Path) -> str:
+    probe = _run(skill_dir, "rev-parse", "--is-inside-work-tree")
+    return "git" if probe.returncode == 0 and _output(probe) == "true" else "package"
 
 
 def check(skill_dir: Path) -> dict[str, Any]:
     skill_dir = skill_dir.expanduser().resolve()
-    probe = _run(skill_dir, "rev-parse", "--is-inside-work-tree")
-    if probe.returncode == 0 and _output(probe) == "true":
-        result = _base(skill_dir)
-        remote = _run(skill_dir, "remote", "get-url", "origin")
-        if remote.returncode != 0 or not _output(remote):
-            result.update({"status": "unavailable", "reason": "origin_not_configured"})
-            return result
-        remote_url = _output(remote)
-        result["remote_provider"] = "github" if re.search(r"github\.com", remote_url, re.IGNORECASE) else "git"
-        result["repository"] = remote_url
+    config = _load_update_config(skill_dir)
+    result = _base(skill_dir)
+    result.update(
+        {
+            "name": config["name"],
+            "install_type": _install_type(skill_dir),
+            "repository": config["repository"],
+            "branch": config["branch"],
+            "version_file": config["version_file"],
+            "version_urls": config["version_urls"],
+        }
+    )
 
-        branch_result = _run(skill_dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-        branch = _output(branch_result)
-        if branch_result.returncode != 0 or not branch:
-            result.update({"status": "unavailable", "reason": "detached_head"})
-            return result
-        local_result = _run(skill_dir, "rev-parse", "HEAD")
-        if local_result.returncode != 0 or not _output(local_result):
-            result.update({"status": "unavailable", "reason": "local_revision_unavailable"})
-            return result
-        local_sha = _output(local_result)
-        remote_sha, remote_result = _remote_head(remote_url, branch)
-        if not remote_sha:
-            result.update({"status": "check_failed", "reason": _error_kind(remote_result), "branch": branch})
-            return result
-        result.update({"branch": branch, "local_sha": local_sha, "remote_sha": remote_sha, "install_type": "git"})
-        result["status"] = "up_to_date" if local_sha == remote_sha else "update_available"
+    local_version, local_source, local_error = _local_version(skill_dir, config)
+    result.update({"local_version": local_version or None, "local_version_source": local_source})
+    if local_error:
+        result.update({"status": "check_failed", "reason": local_error})
         return result
 
-    return _package_check(skill_dir)
+    remote_version, version_url, fetch_errors = _fetch_remote_version(config["version_urls"])
+    if not remote_version or not version_url:
+        result.update(
+            {
+                "status": "check_failed",
+                "reason": "remote_version_unavailable",
+                "attempts": fetch_errors,
+            }
+        )
+        return result
+
+    local_parsed = _parse_version(local_version)
+    remote_parsed = _parse_version(remote_version)
+    if not local_parsed or not remote_parsed:
+        result.update({"status": "check_failed", "reason": "version_compare_failed"})
+        return result
+
+    if remote_parsed > local_parsed:
+        relation = "remote_newer"
+        status = "update_available"
+    elif remote_parsed == local_parsed:
+        relation = "same"
+        status = "up_to_date"
+    else:
+        relation = "local_newer"
+        status = "up_to_date"
+    result.update(
+        {
+            "status": status,
+            "version_relation": relation,
+            "remote_version": remote_version,
+            "version_url": version_url,
+        }
+    )
+    return result
+
+
+def _error_kind(result: subprocess.CompletedProcess[str]) -> str:
+    text = ((result.stderr or "") + " " + (result.stdout or "")).lower()
+    if "could not resolve host" in text or "network is unreachable" in text or "failed to connect" in text:
+        return "network_unreachable"
+    if "authentication" in text or "permission denied" in text or "repository not found" in text:
+        return "remote_authentication_failed"
+    return "git_command_failed"
+
+
+def _download_bytes(url: str) -> bytes:
+    if not url.startswith("https://"):
+        raise ValueError("download_url_invalid")
+    request = urllib_request.Request(
+        url,
+        headers={
+            "Accept": "application/zip, application/octet-stream",
+            "User-Agent": "biaoshu-master-updater/1",
+        },
+    )
+    with urllib_request.urlopen(request, timeout=30) as response:
+        payload = response.read(MAX_ARCHIVE_BYTES + 1)
+    if len(payload) > MAX_ARCHIVE_BYTES:
+        raise ValueError("archive_too_large")
+    return payload
+
+
+def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
+    root = destination.resolve()
+    for member in archive.infolist():
+        raw_name = member.filename.replace("\\", "/")
+        path = PurePosixPath(raw_name)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("archive_path_invalid")
+        if not raw_name or raw_name == ".":
+            continue
+        mode = (member.external_attr >> 16) & 0o170000
+        if mode == stat.S_IFLNK:
+            raise ValueError("archive_symlink_not_allowed")
+        if member.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise ValueError("archive_member_too_large")
+
+        target = (destination.joinpath(*path.parts)).resolve()
+        if os.path.commonpath([str(root), str(target)]) != str(root):
+            raise ValueError("archive_path_invalid")
+        if raw_name.endswith("/"):
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member, "r") as source, target.open("wb") as output:
+            shutil.copyfileobj(source, output, length=1024 * 1024)
+
+
+def _find_package_root(extracted: Path) -> Path:
+    direct = extracted / "SKILL.md"
+    if direct.is_file():
+        return extracted
+    candidates = [path.parent for path in extracted.rglob("SKILL.md") if path.is_file()]
+    if len(candidates) != 1:
+        raise ValueError("remote_package_root_invalid")
+    return candidates[0]
 
 
 def _ignore_package(_directory: str, names: list[str]) -> list[str]:
     return [name for name in names if name in IGNORED_PACKAGE_DIRS or name in IGNORED_PACKAGE_FILES]
 
 
+def _copy_preserved_path(source: Path, destination: Path) -> None:
+    if source.is_dir():
+        shutil.copytree(source, destination)
+    elif source.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def _replace_package(skill_dir: Path, remote_dir: Path) -> None:
-    """Replace a ZIP install with a validated remote package, with rollback."""
+    """Replace a ZIP package with rollback and preservation of local runtime data."""
     backup_root = Path(tempfile.mkdtemp(prefix="biaoshu-master-backup-", dir=str(skill_dir.parent)))
     backup = backup_root / skill_dir.name
     moved = False
@@ -200,6 +370,11 @@ def _replace_package(skill_dir: Path, remote_dir: Path) -> None:
         skill_dir.rename(backup)
         moved = True
         shutil.copytree(remote_dir, skill_dir, ignore=_ignore_package)
+        for name in sorted(PRESERVED_LOCAL_DIRS):
+            source = backup / name
+            destination = skill_dir / name
+            if source.exists() and not destination.exists():
+                _copy_preserved_path(source, destination)
     except Exception:
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
@@ -210,15 +385,52 @@ def _replace_package(skill_dir: Path, remote_dir: Path) -> None:
         shutil.rmtree(backup_root, ignore_errors=True)
 
 
+def _update_package(skill_dir: Path, config: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    download_url = str(config.get("download_url") or "").strip()
+    if not download_url:
+        result.update({"status": "update_failed", "reason": "download_url_missing"})
+        return result
+    result["download_url"] = download_url
+
+    archive_bytes = _download_bytes(download_url)
+    with tempfile.TemporaryDirectory(prefix="biaoshu-master-update-", dir=str(skill_dir.parent)) as holder:
+        extracted = Path(holder) / "extracted"
+        extracted.mkdir()
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            _safe_extract(archive, extracted)
+        remote_dir = _find_package_root(extracted)
+        required = (
+            remote_dir / "SKILL.md",
+            remote_dir / "scripts" / "check_skill_update.py",
+            remote_dir / str(config["version_file"]),
+        )
+        if not all(path.is_file() for path in required):
+            result.update({"status": "update_failed", "reason": "remote_package_invalid"})
+            return result
+        _replace_package(skill_dir, remote_dir)
+
+    after_version, _source, _error = _local_version(skill_dir, config)
+    result.update(
+        {
+            "status": "updated",
+            "before_version": result.get("local_version"),
+            "after_version": after_version or None,
+        }
+    )
+    return result
+
+
 def update(skill_dir: Path) -> dict[str, Any]:
+    skill_dir = skill_dir.expanduser().resolve()
     result = check(skill_dir)
     result["update_requested"] = True
+    if result.get("status") != "update_available":
+        return result
+
     if result.get("install_type") == "git":
-        if result.get("status") != "update_available":
-            return result
         dirty = _run(skill_dir, "status", "--porcelain")
         if dirty.returncode != 0:
-            result.update({"status": "check_failed", "reason": _error_kind(dirty)})
+            result.update({"status": "update_failed", "reason": _error_kind(dirty)})
             return result
         if _output(dirty):
             result.update({"status": "update_blocked_dirty", "reason": "working_tree_dirty"})
@@ -228,43 +440,28 @@ def update(skill_dir: Path) -> dict[str, Any]:
         if pulled.returncode != 0:
             result.update({"status": "update_failed", "reason": _error_kind(pulled)})
             return result
-        after = _run(skill_dir, "rev-parse", "HEAD")
-        result.update({"status": "updated", "before_sha": result.get("local_sha"), "after_sha": _output(after)})
-        return result
-
-    if result.get("status") != "update_available":
-        return result
-    repository, branch = _load_update_config(skill_dir)
-    holder, remote_dir, clone_result = _clone_remote(repository, branch)
-    if not holder or not remote_dir:
-        result.update({"status": "update_failed", "reason": _error_kind(clone_result or subprocess.CompletedProcess([], 1, "", ""))})
-        return result
-    try:
-        required = (remote_dir / "SKILL.md", remote_dir / "scripts" / "check_skill_update.py")
-        if not all(path.is_file() for path in required):
-            result.update({"status": "update_failed", "reason": "remote_package_invalid"})
-            return result
-        _replace_package(skill_dir, remote_dir)
+        after_version, _source, _error = _local_version(skill_dir, _load_update_config(skill_dir))
         result.update(
             {
                 "status": "updated",
-                "before_package_sha256": result.get("local_package_sha256"),
-                "after_package_sha256": _package_sha256(skill_dir),
-                "after_sha": result.get("remote_sha"),
+                "before_version": result.get("local_version"),
+                "after_version": after_version or None,
             }
         )
         return result
-    except (OSError, shutil.Error, ValueError) as exc:
-        result.update({"status": "update_failed", "reason": "package_replace_failed", "detail": str(exc)})
+
+    config = _load_update_config(skill_dir)
+    try:
+        return _update_package(skill_dir, config, result)
+    except (OSError, ValueError, urllib_error.URLError, zipfile.BadZipFile, shutil.Error) as exc:
+        result.update({"status": "update_failed", "reason": str(exc) or "package_update_failed"})
         return result
-    finally:
-        holder.cleanup()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skill-dir", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--update", action="store_true", help="仅在用户已明确同意后执行快进更新")
+    parser.add_argument("--update", action="store_true", help="仅在用户已明确同意后执行更新")
     args = parser.parse_args()
     result = update(args.skill_dir) if args.update else check(args.skill_dir)
     print(json.dumps(result, ensure_ascii=False, indent=2))
