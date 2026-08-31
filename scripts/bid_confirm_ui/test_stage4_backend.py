@@ -72,12 +72,16 @@ class Stage4LifecycleTest(unittest.TestCase):
 
     def test_limits_and_lifecycle(self) -> None:
         status,payload=self.request('/api/stage4');self.assertEqual(status,200);self.assertEqual(payload['workflow']['active_stage'],'stage4')
+        status,rules=self.request('/api/generation-rules');self.assertEqual(status,200);self.assertEqual(rules['generation_rules']['default_profile_id'],'default');self.assertGreaterEqual(len(rules['generation_rules']['profiles']),4)
+        preset=next(item for item in rules['generation_rules']['profiles'] if item['id']=='system-integration-delivery')
+        self.delivery['generation_rule']={key:preset[key] for key in ('id','name','kind','description','path','sha256','base_id','base_sha256','effective_sha256')}
         source_hash=payload['source_sha256']
         for invalid_count in (0,6,1.5):
             invalid=deepcopy(self.delivery);invalid['word_batch_count']=invalid_count
             status,result=self.request('/api/stage4/confirm',{'source_sha256':source_hash,'data':invalid})
             self.assertEqual(status,422);self.assertFalse(result['ok'])
         status,result=self.request('/api/stage4/confirm',{'source_sha256':source_hash,'data':self.delivery});self.assertEqual(status,200);self.assertEqual(result['receipt']['status'],'confirmed')
+        self.assertEqual(result['receipt']['data']['generation_rule']['id'],'system-integration-delivery')
         self.assertEqual(result['receipt']['data']['word_batch_count'],2);self.assertFalse(result['receipt']['data']['skill_boundary']['generate_images'])
         status,duplicate=self.request('/api/stage4/confirm',{'source_sha256':source_hash,'data':self.delivery});self.assertEqual(status,422);self.assertFalse(duplicate['ok'])
         status,reopened=self.request('/api/stage4/reopen',{});self.assertEqual(status,200);self.assertEqual(reopened['mode'],'editing')

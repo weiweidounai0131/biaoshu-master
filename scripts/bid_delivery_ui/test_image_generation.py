@@ -35,6 +35,7 @@ class ImageGenerationTest(unittest.TestCase):
             protocol.begin_active_batch(project_dir)
             fixture._write_artifacts(batch_id, "image-generation")
             export_word.export_word(project_dir, batch_id)
+            fixture._pass_ai_recheck(batch_id)
             protocol.confirm_batch(project_dir, batch_id)
         protocol.record_wps_page_check(project_dir, "word-batch-1", 10, "测试WPS")
         protocol.record_wps_page_check(project_dir, "word-batch-2", 10, "测试WPS")

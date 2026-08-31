@@ -20,6 +20,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from bid_confirm_ui import server as confirm_ui
 from bid_delivery_ui import export_image_plan, export_word, protocol
+import rule_profiles
 
 
 class DeliveryProtocolTest(unittest.TestCase):
@@ -154,6 +155,37 @@ class DeliveryProtocolTest(unittest.TestCase):
         source_path.write_text(json.dumps(source, ensure_ascii=False), encoding="utf-8")
         export_path.write_bytes(f"docx-placeholder-{marker}".encode("utf-8"))
 
+    def _ai_recheck_report(self, batch_id: str, status: str = "passed", findings: list[dict] | None = None) -> dict:
+        manifest = protocol.load_manifest(self.project_dir)
+        batch = next(item for item in manifest["word_batches"] if item["id"] == batch_id)
+        source = protocol.read_json(protocol.delivery_dir(self.project_dir) / batch["source_path"])
+        scope = sorted(protocol.AI_RECHECK_REQUIRED_SCOPE)
+        findings = findings or []
+        report = {
+            "schema_version": 1, "kind": "bid_delivery_ai_recheck", "status": "passed",
+            "project_id": manifest["project_id"], "batch_id": batch_id, "batch_order": batch["order"],
+            "stage4_confirmation_sha256": manifest["stage4_confirmation_sha256"],
+            "source_sha256": batch["source_sha256"], "export_sha256": batch["export_sha256"],
+            "writing_rules_sha256": manifest["writing_rules"]["project_sha256"],
+            "checked_at": protocol.utc_now(), "checker": "测试AI复校", "rules_read": True,
+            "scope": scope,
+            "summary": {
+                "checked_blocks": len(source["blocks"]),
+                "checked_paragraphs": sum(1 for block in source["blocks"] if block["type"] == "paragraph"),
+                "checked_sections": len(source["chapters"]),
+                "blocking_findings": sum(1 for finding in findings if finding["severity"] == "blocking"),
+                "warning_findings": sum(1 for finding in findings if finding["severity"] == "warning"),
+                "info_findings": sum(1 for finding in findings if finding["severity"] == "info"),
+            },
+            "findings": findings,
+        }
+        report["status"] = status
+        return report
+
+    def _pass_ai_recheck(self, batch_id: str) -> dict:
+        report = self._ai_recheck_report(batch_id)
+        return protocol.record_ai_recheck(self.project_dir, batch_id, report)
+
     def test_initialization_is_authorized_idempotent_and_empty(self) -> None:
         manifest, created = protocol.initialize_delivery(self.project_dir)
         self.assertTrue(created)
@@ -178,6 +210,22 @@ class DeliveryProtocolTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "规则缺失或已被替换"):
             protocol.load_manifest(self.project_dir)
 
+    def test_selected_generation_rule_is_bound_to_project_snapshot(self) -> None:
+        receipt_path = self.data_dir / confirm_ui.STAGE4_RECEIPT
+        receipt = confirm_ui.read_json(receipt_path)
+        receipt["data"]["generation_rule"] = {
+            key: rule_profiles.selection_descriptor("system-integration-delivery")[key]
+            for key in rule_profiles.SELECTION_KEYS
+        }
+        receipt.pop("confirmation_sha256", None)
+        receipt["confirmation_sha256"] = confirm_ui.sha256_data(receipt)
+        confirm_ui.atomic_write_json(receipt_path, receipt)
+        manifest, _created = protocol.initialize_delivery(self.project_dir)
+        self.assertEqual(manifest["generation_rule"]["id"], "system-integration-delivery")
+        self.assertEqual(manifest["writing_rules"]["profile_id"], "system-integration-delivery")
+        snapshot = protocol.writing_rules_path(self.project_dir).read_text(encoding="utf-8")
+        self.assertIn("信息化建设与系统集成", snapshot)
+
     def test_source_must_bind_current_writing_rules(self) -> None:
         protocol.initialize_delivery(self.project_dir)
         protocol.begin_active_batch(self.project_dir)
@@ -198,6 +246,10 @@ class DeliveryProtocolTest(unittest.TestCase):
             protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
         self._write_artifacts("word-batch-1", "v1")
         manifest = protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self.assertEqual(manifest["status"], "ai_rechecking")
+        with self.assertRaisesRegex(ValueError, "AI复校尚未通过"):
+            protocol.confirm_batch(self.project_dir, "word-batch-1")
+        manifest = self._pass_ai_recheck("word-batch-1")["manifest"]
         self.assertEqual(manifest["status"], "awaiting_batch_review")
         manifest, revision = protocol.request_revision(self.project_dir, "word-batch-1", "请补强这一批的实施逻辑")
         self.assertEqual(manifest["status"], "revision_pending")
@@ -210,6 +262,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         self.assertEqual(manifest["pending_request_count"], 0)
         self._write_artifacts("word-batch-1", "v2")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         manifest, confirmed = protocol.confirm_batch(self.project_dir, "word-batch-1")
         self.assertEqual(confirmed["type"], "batch-confirmed")
         self.assertTrue((self.project_dir / "测试标书-第1批.docx").is_file())
@@ -219,6 +272,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-2", "v1")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-2")
+        self._pass_ai_recheck("word-batch-2")
         manifest, _ = protocol.confirm_batch(self.project_dir, "word-batch-2")
         self.assertEqual(manifest["status"], "all_batches_confirmed")
         self.assertIsNone(manifest["active_batch_id"])
@@ -290,10 +344,11 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "export")
         word_result = export_word.export_word(self.project_dir, "word-batch-1")
+        recheck_result = self._pass_ai_recheck("word-batch-1")
         word_path = Path(word_result["output"])
         self.assertTrue(word_path.is_file())
         self.assertTrue(zipfile.is_zipfile(word_path))
-        self.assertEqual(word_result["manifest"]["word_batches"][0]["status"], "ready_for_review")
+        self.assertEqual(recheck_result["manifest"]["word_batches"][0]["status"], "ready_for_review")
         from docx import Document
         document = Document(word_path)
         self.assertTrue(any(item.text == "1.1 二级标题" and item.style.name == "Heading 2" for item in document.paragraphs))
@@ -321,6 +376,7 @@ class DeliveryProtocolTest(unittest.TestCase):
             protocol.begin_active_batch(self.project_dir)
             self._write_artifacts(batch_id, f"final-{batch_id}")
             export_word.export_word(self.project_dir, batch_id)
+            self._pass_ai_recheck(batch_id)
             with self.assertRaisesRegex(ValueError, "当前交付尚未|最终交付条件"):
                 protocol.confirm_final_delivery(self.project_dir)
             manifest, _event = protocol.confirm_batch(self.project_dir, batch_id)
@@ -347,6 +403,7 @@ class DeliveryProtocolTest(unittest.TestCase):
             protocol.begin_active_batch(self.project_dir)
             self._write_artifacts(batch_id, "estimate-only")
             export_word.export_word(self.project_dir, batch_id)
+            self._pass_ai_recheck(batch_id)
             manifest = protocol.load_manifest(self.project_dir)
             batch = next(item for item in manifest["word_batches"] if item["id"] == batch_id)
             validation_path = protocol.delivery_dir(self.project_dir) / protocol.RESULTS_DIR_NAME / f"word-batch-{batch['order']:02d}-validation.json"
@@ -362,6 +419,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "reader")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         overview = protocol.delivery_overview_payload(self.project_dir)
         self.assertTrue(overview["read_only"])
         self.assertTrue(overview["batches"][0]["readable"])
@@ -380,6 +438,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "direct")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         before = protocol.load_manifest(self.project_dir)
         result = protocol.apply_direct_edit(self.project_dir, "word-batch-1", "block-1", before["word_batches"][0]["source_sha256"], "经修订后的确定性正文。")
         updated = result["manifest"]
@@ -388,9 +447,13 @@ class DeliveryProtocolTest(unittest.TestCase):
         self.assertEqual(batch["status"], "export_pending")
         self.assertIsNone(batch["export_sha256"])
         self.assertTrue((protocol.delivery_dir(self.project_dir) / "history" / f"{result['record_id']}.json").is_file())
+        with self.assertRaisesRegex(ValueError, "尚未生成"):
+            protocol.batch_reader_payload(self.project_dir, "word-batch-1")
+        export_word.export_word(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         reader = protocol.batch_reader_payload(self.project_dir, "word-batch-1")
         self.assertEqual(reader["blocks"][0]["text"], "经修订后的确定性正文。")
-        with self.assertRaisesRegex(ValueError, "需重新导出"):
+        with self.assertRaisesRegex(ValueError, "源稿已更新"):
             protocol.apply_direct_edit(self.project_dir, "word-batch-1", "block-1", before["word_batches"][0]["source_sha256"], "旧页面覆盖。")
 
     def test_direct_edit_supports_list_and_table(self) -> None:
@@ -398,10 +461,12 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "rich-direct")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         manifest = protocol.load_manifest(self.project_dir)
         result = protocol.apply_direct_edit(self.project_dir, "word-batch-1", "block-2", manifest["word_batches"][0]["source_sha256"], replacement_items=["新要点一", "新要点二"])
         self.assertEqual(result["manifest"]["word_batches"][0]["status"], "export_pending")
         export_word.export_word(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         manifest = protocol.load_manifest(self.project_dir)
         result = protocol.apply_direct_edit(self.project_dir, "word-batch-1", "block-3", manifest["word_batches"][0]["source_sha256"], replacement_columns=["项目", "要求"], replacement_rows=[["范围", "全量"]])
         self.assertEqual(result["manifest"]["word_batches"][0]["status"], "export_pending")
@@ -411,6 +476,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "reopen")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         confirmed, _event = protocol.confirm_batch(self.project_dir, "word-batch-1")
         updated = protocol.apply_direct_edit(self.project_dir, "word-batch-1", "block-1", confirmed["word_batches"][0]["source_sha256"], "确认后的修订正文。")
         self.assertEqual(updated["manifest"]["status"], "export_pending")
@@ -423,6 +489,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "page-mismatch")
         export_word.export_word(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         confirmed, _event = protocol.confirm_batch(self.project_dir, "word-batch-1")
         self.assertEqual(confirmed["word_batches"][0]["status"], "confirmed")
         result = protocol.record_wps_page_check(self.project_dir, "word-batch-1", 5, "测试WPS")
@@ -442,15 +509,17 @@ class DeliveryProtocolTest(unittest.TestCase):
 
         protocol.begin_revision(self.project_dir, "word-batch-1")
         self._write_artifacts("word-batch-1", "page-mismatch-fixed")
-        revised = protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
-        self.assertEqual(revised["word_batches"][0]["status"], "ready_for_review")
-        self.assertEqual(revised["word_batches"][0]["output_filename"], "测试标书-第1批—审校版1.docx")
+        protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        revised = self._pass_ai_recheck("word-batch-1")
+        self.assertEqual(revised["manifest"]["word_batches"][0]["status"], "ready_for_review")
+        self.assertEqual(revised["manifest"]["word_batches"][0]["output_filename"], "测试标书-第1批—审校版1.docx")
 
     def test_ai_request_lifecycle_rejects_stale_source(self) -> None:
         protocol.initialize_delivery(self.project_dir)
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "ai")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         manifest = protocol.load_manifest(self.project_dir)
         created = protocol.create_ai_request(self.project_dir, "word-batch-1", "block-1", manifest["word_batches"][0]["source_sha256"], "请将本段改得更严谨。")
         request_id = created["request"]["id"]
@@ -468,6 +537,7 @@ class DeliveryProtocolTest(unittest.TestCase):
         protocol.begin_active_batch(self.project_dir)
         self._write_artifacts("word-batch-1", "stale")
         protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        self._pass_ai_recheck("word-batch-1")
         manifest = protocol.load_manifest(self.project_dir)
         created = protocol.create_ai_request(self.project_dir, "word-batch-1", "block-1", manifest["word_batches"][0]["source_sha256"], "请修改本段。")
         request_id = created["request"]["id"]
@@ -479,6 +549,47 @@ class DeliveryProtocolTest(unittest.TestCase):
             protocol.begin_ai_request(self.project_dir, request_id)
         self.assertEqual(protocol.read_json(request_path)["status"], "superseded")
         self.assertEqual(protocol.load_manifest(self.project_dir)["status"], "export_pending")
+
+    def test_ai_recheck_failure_blocks_human_and_retries_with_new_hash(self) -> None:
+        protocol.initialize_delivery(self.project_dir)
+        protocol.begin_active_batch(self.project_dir)
+        self._write_artifacts("word-batch-1", "ai-recheck")
+        protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        report_path = protocol.delivery_dir(self.project_dir) / "results" / "ai-recheck-batch-01.json"
+        self.assertEqual(protocol.read_json(report_path)["status"], "running")
+        failed_report = self._ai_recheck_report(
+            "word-batch-1", "failed", [{
+                "id": "duplicate-1", "severity": "blocking", "category": "duplicate_control",
+                "location": "1.1 / block-1", "description": "发现与其他段落重复的长正文。",
+                "evidence": ["与第1批前文存在高度相似句群"], "resolution": "改写并重新导出本批Word。",
+            }],
+        )
+        failed = protocol.record_ai_recheck(self.project_dir, "word-batch-1", failed_report)
+        self.assertEqual(failed["manifest"]["status"], "revising")
+        self.assertEqual(failed["manifest"]["word_batches"][0]["status"], "regenerating")
+        with self.assertRaisesRegex(ValueError, "只有待审校"):
+            protocol.confirm_batch(self.project_dir, "word-batch-1")
+
+        self._write_artifacts("word-batch-1", "ai-recheck-fixed")
+        protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        report = self._pass_ai_recheck("word-batch-1")
+        self.assertEqual(report["report"]["status"], "passed")
+        self.assertTrue(list((protocol.delivery_dir(self.project_dir) / "history").glob("ai-recheck-batch-01-*.json")))
+        self.assertEqual(protocol.load_manifest(self.project_dir)["word_batches"][0]["status"], "ready_for_review")
+
+    def test_ai_recheck_rejects_stale_or_incomplete_report(self) -> None:
+        protocol.initialize_delivery(self.project_dir)
+        protocol.begin_active_batch(self.project_dir)
+        self._write_artifacts("word-batch-1", "ai-recheck-validation")
+        protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+        stale = self._ai_recheck_report("word-batch-1")
+        stale["source_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "未绑定当前源稿和Word"):
+            protocol.record_ai_recheck(self.project_dir, "word-batch-1", stale)
+        incomplete = self._ai_recheck_report("word-batch-1")
+        incomplete["scope"] = ["writing_rules"]
+        with self.assertRaisesRegex(ValueError, "复校范围缺少"):
+            protocol.record_ai_recheck(self.project_dir, "word-batch-1", incomplete)
 
     def test_image_plan_can_be_edited_and_reexported_for_review(self) -> None:
         protocol.initialize_delivery(self.project_dir)

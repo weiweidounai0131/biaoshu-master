@@ -4,6 +4,12 @@
 
 当前版本实现本地服务骨架、第1页“项目口径确认”、第2页“标书框架确认”、第3页“图片规划确认”和第4页“最终交付确认”。第4页只写最终授权回执，不直接生成标书；授权后的正文生成、网页审校、修改应用与最终导出由独立的[生产与审校台协议](production-review.md)负责。
 
+## 项目工作区生命周期
+
+确认台使用的`<project_dir>`必须先由`python3 scripts/project_workspace.py resolve`解析。默认工作区根目录为`~/Documents/biaoshu-master-projects`，脚本返回稳定的`project_id`和项目目录；后续确认台、阶段推荐和生产审校台必须使用同一目录和ID。不同项目必须使用不同工作区，同一项目再次调用时复用原工作区。
+
+恢复中断流程时，对原目录执行`prepare_intake.py <project_dir> --resume`，保留当前入口和`run_id`；重新开始一轮时不传`--resume`，旧确认状态归档到`bid_confirm_ui/history/`，旧交付区归档到`bid_delivery-history/`，外层项目目录和项目身份保持不变。项目资料只记录用户提供的本地路径，不由工作区管理器复制。
+
 ## 正式流程前的背景与资料入口
 
 入口采用一次性阻断弹窗，不增加`00`、`G00`或任何可见步骤，也不出现在阶段导航中。AI先在`<project_dir>/bid_confirm_ui/intake-recommendations.json`写入预填数据。新项目使用`schema_version: 2`；旧项目的`schema_version: 1`仍可读取，并将`source_paths`视为背景资料。顶层字段：
@@ -125,6 +131,7 @@ AI必须在有效阶段3回执基础上生成`<project_dir>/bid_confirm_ui/stage
 - `delivery.word_batch_count`：Word生成批次，只允许1至5的整数；
 - `delivery.word_batches`：与批次数完全一致的Word文件清单，按原顺序完整覆盖全部一级章节且不得重复；
 - `delivery.image_plan_workbook`：固定为1个`.xlsx`图片规划表，记录文件名、工作表、字段和图片数量；
+- `delivery.generation_rule`：Stage4正文生成规则选择，默认使用通用规则，也可以选择规则索引中的领域预设或用户自定义覆盖层；该选择会与最终授权和项目级规则快照绑定；
 - `delivery.skill_boundary`：固定允许生成Word和图片规划Excel，G0至G7固定禁止生成图片和插入图片；最终交付后的可选本机生图不属于确认台协议，必须等待用户明确回复“继续”后按[最终交付后生图协议](post-delivery-image-generation.md)执行；
 - `delivery.additional_notes`：用户选填的最终注意事项。
 
@@ -132,7 +139,7 @@ AI必须在有效阶段3回执基础上生成`<project_dir>/bid_confirm_ui/stage
 
 图片交付固定为1个Excel。Excel包含已确认图片规划的图号、位置、名称、核心表达、核心节点、构图、方向、统一视觉要求和逐图`AI生图提示词`，供用户交给其他AI或最终交付后的本机生图流程。本技能在G0至G7不调用生图、不生成或交付图片文件、不记录成图路径，也不插入图片。
 
-阶段4确认按钮的含义是“授权当前调用技能的AI开始生产”，不是浏览器直接调用AI。确认后，AI通过前台`--wait-only --wait-stage stage4 --wait-timeout 0`取得本地回执，再启动独立生产与审校台。该交接不得依赖Codex或WorkBuddy专属接口。
+阶段4确认按钮的含义是“授权当前调用技能的AI按所选规则开始生产”，不是浏览器直接调用AI。确认后，AI通过前台`--wait-only --wait-stage stage4 --wait-timeout 0`取得本地回执，再启动独立生产与审校台。该交接不得依赖Codex或WorkBuddy专属接口。页面的“新建专属规则”只复制规则制作引导语，不在浏览器写入Skill；用户发送标准引导语后，按[专属规则制作模式](custom-rule-authoring.md)完成本地登记。
 
 提交后写入`stage4-confirmation.json`。确认后页面转为只读；只读回看不改变任何状态。点击“修改本阶段”并二次确认，只归档阶段4回执并恢复阶段4编辑，不影响前三阶段。
 

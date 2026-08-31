@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+import project_workspace
+
 
 def now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -55,6 +57,35 @@ def archive_previous_run(data_dir: Path) -> str | None:
     return str(target)
 
 
+def archive_previous_delivery(project_dir: Path) -> str | None:
+    """Move the previous delivery workspace aside before a fresh intake.
+
+    A new intake reuses the project directory but must not leave an old
+    manifest available to the new confirmation chain. Keeping the old tree in
+    a sibling history directory preserves its audit trail and exported files.
+    """
+
+    source = project_dir / "bid_delivery"
+    if not source.exists():
+        return None
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
+    target = project_dir / "bid_delivery-history" / f"{stamp}-new-intake"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, target)
+    return str(target)
+
+
+def existing_intake(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("project_dir", type=Path)
@@ -73,7 +104,21 @@ def main() -> int:
 
     project_dir = args.project_dir.expanduser().resolve()
     data_dir = project_dir / "bid_confirm_ui"
-    archived = None if args.resume else archive_previous_run(data_dir)
+    target = data_dir / "intake-recommendations.json"
+    if args.resume:
+        if any((args.background.strip(), args.background_file, args.background_path, args.reference_path, args.path, args.project_id)) or args.tender_position != "main":
+            parser.error("--resume 不能同时提交新的项目背景、资料路径、项目ID或标书定位")
+        current = existing_intake(target)
+        if not current or not str(current.get("project_id", "")).strip() or not str(current.get("run_id", "")).strip():
+            parser.error("当前项目没有可恢复的入口运行；请去掉 --resume 创建新一轮")
+        print(target)
+        print("resumed_existing=true")
+        print(f"project_id={current['project_id']}")
+        print(f"run_id={current['run_id']}")
+        return 0
+
+    archived = archive_previous_run(data_dir)
+    archived_delivery = archive_previous_delivery(project_dir)
     background = args.background
     if args.background_file:
         background = args.background_file.expanduser().read_text(encoding="utf-8")
@@ -87,9 +132,11 @@ def main() -> int:
     if missing:
         parser.error(f"local path does not exist: {missing[0]}")
 
-    project_id = args.project_id or hashlib.sha256(str(project_dir).encode("utf-8")).hexdigest()[:20]
+    managed_project_id = project_workspace.project_id_for(project_dir)
+    if args.project_id and managed_project_id and args.project_id != managed_project_id:
+        parser.error("--project-id 与当前项目工作区身份不一致")
+    project_id = args.project_id or managed_project_id or hashlib.sha256(str(project_dir).encode("utf-8")).hexdigest()[:20]
     run_id = uuid.uuid4().hex
-    target = data_dir / "intake-recommendations.json"
     write_json(target, {
         "schema_version": 2,
         "stage": "intake",
@@ -109,6 +156,10 @@ def main() -> int:
     print(target)
     if archived:
         print(f"archived_previous_run={archived}")
+    if archived_delivery:
+        print(f"archived_previous_delivery={archived_delivery}")
+    project_workspace.record_run(project_dir, run_id, project_id)
+    print(f"project_id={project_id}")
     print(f"run_id={run_id}")
     return 0
 

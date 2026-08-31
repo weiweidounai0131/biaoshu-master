@@ -116,11 +116,23 @@ description: 面向政府部门、事业单位、国企、央企及其他政企�
 
 确认台四个页面必须以`/api/session`返回的统一工作流状态控制可用性，不得由各页根据局部接口自行推断；同时必须区分“后台流程当前进度”和“用户当前查看页”。红色高亮始终跟随当前查看页。已进入阶段4后回看阶段1时，阶段1红色高亮，阶段2至3保持绿色勾选与“已确认 · 只读回看”，阶段4显示为可点击返回的当前进度但不高亮；返回阶段4后阶段4再恢复红色高亮。回看不得改变后台流程状态。不得显示“进入”“可查看”等额外尾部状态。四页“修改本阶段”按钮使用统一组件样式和文案，只有二次确认修改时才改变工作流状态。
 
+### 项目工作区管理
+
+每次新建或恢复标书项目流程前，必须先运行`python3 scripts/project_workspace.py resolve`解析项目工作区，并读取返回的`project_dir`和`project_id`；后续`prepare_intake.py`、确认台、阶段推荐和交付台全部使用这两个值。未显式指定工作区时，默认根目录为`~/Documents/biaoshu-master-projects`，也可用`BIAOSHU_PROJECTS_ROOT`或`--root`更改。技能包、项目资料和交付物不放在同一目录。
+
+工作区身份优先使用用户提供的`--project-key`，否则使用项目名称、招标人/客户和招标编号；若同时提供背景资料路径，还会使用其路径指纹辅助区分同名项目。不同项目创建不同的工作区目录；同一项目再次调用时返回原目录和原`project_id`。同名但资料指纹不同的项目不得静默复用；索引出现多个候选时必须要求明确的`--project-key`或`--project-dir`。如需接管旧版本已经存在的项目目录，使用`--project-dir`注册，不移动、不复制其中的资料。
+
+“继续上次中断流程”和“重新开始一轮”必须严格区分：恢复时对同一工作区执行`prepare_intake.py <project_dir> --resume`，保留原入口和`run_id`；新一轮不传`--resume`，继续复用外层工作区，但将旧的确认状态归档到`bid_confirm_ui/history/`，将旧的`bid_delivery/`归档到`bid_delivery-history/`，再生成新的`run_id`。不得把同一个工作区同时当作两个不同项目使用。
+
+### 专属生成规则制作模式
+
+如果当前用户消息同时明确引用`biaoshu-master`技能，并包含“制作专属的标书生成规则”这一意图，必须切换到[专属规则制作模式](references/custom-rule-authoring.md)，不要进入G0至G7，也不要创建项目工作区或启动确认台。一次只引导用户完成领域、重点、硬约束、禁用内容和参考文件收集；先形成规则草案，得到用户明确确认后，才通过`scripts/rule_profiles.py register`写入`rules/custom/`并更新规则索引。默认规则`references/stage4-writing-rules.md`不可被覆盖。登记后按用户要求运行`set-default`，再回到普通对话等待下一次标书制作请求。
+
 ## 大流程
 
 ### G0：资料接收与读取计划确认
 
-先完成对当前对话内容、已提及文件和已上传资料的提取，再把项目背景、背景资料路径和参考资料路径写入`bid_confirm_ui/intake-recommendations.json`，最后启动确认台。入口由用户单选主标或陪标，选择结果写入`intake-confirmation.json`的`tender_position`并作为后续权威定位。优先使用`python3 scripts/prepare_intake.py <project_dir> --background "..." --background-path <绝对路径> --reference-path <绝对路径>`生成入口数据；同类资料可重复使用对应参数，旧参数`--path`仅作为背景资料兼容别名。入口弹窗默认展示这些内容；缺少时由用户在弹窗中一次补齐。文件选择只返回绝对路径，资料始终保留在本地，不发生上传或复制。不要根据文件名猜内容，也不要直接起草正文。
+先完成对当前对话内容、已提及文件和已上传资料的提取，再运行`python3 scripts/project_workspace.py resolve --project-name "..." --client "..." [--tender-reference "..."] [--background-path <绝对路径>]`解析或创建项目工作区；读取返回的`project_dir`、`project_id`、`created`和`reused`后，再把项目背景、背景资料路径和参考资料路径写入`bid_confirm_ui/intake-recommendations.json`，最后启动确认台。入口由用户单选主标或陪标，选择结果写入`intake-confirmation.json`的`tender_position`并作为后续权威定位。使用返回的`project_id`运行`python3 scripts/prepare_intake.py <project_dir> --project-id <project_id> --background "..." --background-path <绝对路径> --reference-path <绝对路径>`生成入口数据；同类资料可重复使用对应参数，旧参数`--path`仅作为背景资料兼容别名。恢复中断轮次时改用同一`project_dir`执行`prepare_intake.py <project_dir> --resume`，不得同时提交新的背景或路径。入口弹窗默认展示这些内容；缺少时由用户在弹窗中一次补齐。文件选择只返回绝对路径，资料始终保留在本地，不发生上传或复制。不要根据文件名猜内容，也不要直接起草正文。
 
 每次重新调用技能默认创建新的运行标识并把旧入口、工作流和阶段文件归档到`bid_confirm_ui/history/`；只有明确恢复同一轮中断流程时才给`prepare_intake.py`传入`--resume`。当前入口文件存在但回执哈希或运行标识失配时必须严格停在入口，不能使用旧阶段推荐或旧工作流状态。
 
@@ -220,13 +232,15 @@ python3 scripts/bid_confirm_ui/server.py <project_dir> --wait-only --wait-stage 
 
 阶段3视觉预填规则：主标根据客户与项目背景生成视觉方向；陪标从随机视觉预设中生成视觉方向，不按客户品牌定向。两种模式都必须完整写入`palette`、`style`、`background`、`density`和`avoid`五项，且允许用户在阶段3页面修改；任何一项为空均不得进入等待或最终确认。
 
-根据最终授权回执中的批次数生成Word。批次数只能是1至5；用户选择N次，必须按已确认的章节分组交付恰好N个Word，不得擅自增减。每批结束后必须交付Word并等待确认。
+根据最终授权回执中的批次数生成Word。批次数只能是1至5；用户选择N次，必须按已确认的章节分组交付恰好N个Word，不得擅自增减。每批结束后必须先完成AI复校，再交付Word并等待人工确认。
 
-阶段4授权后，**不得关闭前置确认台或要求用户打开新的地址**。先执行`python3 scripts/bid_delivery_ui/server.py <project_dir> --init`初始化并校验交付清单；该命令会把[Stage4标书生成规则](references/stage4-writing-rules.md)固化为项目内的`bid_delivery/stage4-writing-rules.md`，并在`manifest.json`中登记规则摘要。当前AI必须读取该项目快照后才能生成正文；每个`source/batch-NN.json`必须写入同一`writing_rules_sha256`，规则文件缺失、被替换或摘要不一致时不得继续生产。随后再以`--daemon --no-browser`启动生产与审校服务。该服务可以使用新的本地端口，但只作为后台承载；原确认页检测到服务就绪后必须用`location.replace()`在同一浏览器标签内切换到生产与审校页。只有用户在前序阶段实际点击“修改本阶段”并确认回退时，才归档生产台并将第4页恢复为最终确认页；单纯回看前序步骤不得改变第4页。AI不得只在聊天中生成Word后结束：每批正文必须先写入项目内的结构化权威稿，审校台从该权威稿展示正文、标题、表格、列表、图片占位和批次状态；Word是由权威稿导出的交付文件，不是浏览器编辑的唯一数据源。正文生产必须分别读取阶段1/入口回执中的`background_paths`与`reference_paths`：前者约束项目事实、评分和承诺，后者只提供经核对后可采用的策略与表达，不得直接混入客户、人员、业绩、数字或承诺。
+阶段4授权后，**不得关闭前置确认台或要求用户打开新的地址**。先执行`python3 scripts/bid_delivery_ui/server.py <project_dir> --init`初始化并校验交付清单；Stage4页面的“生成规则”默认使用当前 Skill 的通用规则，也可以选择规则索引中的领域预设或用户自定义规则。用户选中的规则会随最终授权回执绑定，`--init`会把默认规则与选中的领域覆盖层固化为项目内的`bid_delivery/stage4-writing-rules.md`，并在`manifest.json`中登记规则摘要和规则ID。当前AI必须读取该项目快照后才能生成正文；每个`source/batch-NN.json`必须写入同一`writing_rules_sha256`，规则文件缺失、被替换或摘要不一致时不得继续生产。随后再以`--daemon --no-browser`启动生产与审校服务。该服务可以使用新的本地端口，但只作为后台承载；原确认页检测到服务就绪后必须用`location.replace()`在同一浏览器标签内切换到生产与审校页。只有用户在前序阶段实际点击“修改本阶段”并确认回退时，才归档生产台并将第4页恢复为最终确认页；单纯回看前序步骤不得改变第4页。AI不得只在聊天中生成Word后结束：每批正文必须先写入项目内的结构化权威稿，审校台从该权威稿展示正文、标题、表格、列表、图片占位和批次状态；Word是由权威稿导出的交付文件，不是浏览器编辑的唯一数据源。正文生产必须分别读取阶段1/入口回执中的`background_paths`与`reference_paths`：前者约束项目事实、评分和承诺，后者只提供经核对后可采用的策略与表达，不得直接混入客户、人员、业绩、数字或承诺。
 
 Stage4写作不是“拿到资料后自由发挥”。正式生成任何正文前，必须完整读取[Stage4标书生成规则](references/stage4-writing-rules.md)，按其中的事实口径、评分实质覆盖、章节承接、纵向加厚、重复控制、Word格式、实际页数和渲染门禁执行。该规则统一的是论证逻辑，不是段落模板；用户当前明确指令和阶段确认结果优先，但不得用较低优先级参考资料突破背景事实和规则门禁。
 
-当前生产与审校台已支持交付总览、批次导航、按内容块懒加载阅读、受控回修、Word导出和图片规划Excel导出。每个Word批次必须先写入符合协议的`source/batch-NN.json`，再由`scripts/bid_delivery_ui/export_word.py`生成Word、执行本地结构校验并登记哈希；不得把聊天文本或旧Word直接当成权威稿。
+当前生产与审校台已支持交付总览、批次导航、按内容块懒加载阅读、受控回修、Word导出和图片规划Excel导出。每个Word批次必须先写入符合协议的`source/batch-NN.json`，再由`scripts/bid_delivery_ui/export_word.py`生成Word、执行本地结构校验并登记哈希；登记后批次必然进入`ai_rechecking`，不得把聊天文本或旧Word直接当成权威稿。
+
+**AI复校是人工审阅前的硬闸门：** 当前AI必须在每次Word导出登记后完整读取项目内`bid_delivery/stage4-writing-rules.md`、本批结构化源稿、Word和`results/word-batch-NN-validation.json`，重新核对规则硬约束、项目事实、阶段2一至三级骨架、评分覆盖、完全或近似重复段落、跨批术语与成果衔接、Word格式和页数预算。报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`；每个问题都要写明位置、证据和处理建议，不能只写“已检查”。将完整报告写入临时JSON后，执行`python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> --batch <batch_id> --report <report.json>`。只有`status: passed`且没有`blocking`问题才会开放网页正文和确认按钮；`failed`会退回`regenerating`，当前AI修复并重新导出、复校。任何人工操作和最终确认都不能绕过这个闸门。
 
 正文生成采用“目录先行、深度优先”的顺序：先按已确认的一至三级骨架建立本批标题树，再填充正文。页数不足时，严格按“扩展已有段落（讲透方法、步骤、角色、边界、验证和成果）→在已有三级标题下挂靠四级标题→必要时挂靠更深层标题→补充适合的表格或列表”执行。禁止追加无父级的独立模块、用空泛段落或靠连续增加标题凑页。每个新增标题都要能回答：它是否是真实子主题、是否能写出至少两块有逻辑的支撑内容、删除后原章节是否不完整。
 
@@ -236,11 +250,11 @@ Stage4写作不是“拿到资料后自由发挥”。正式生成任何正文�
 
 **页数审校迭代：** 每批确认交付后，审校台会显示页数校验区。导出器已经给出AI预计页数且预计值在计划页数`±10%`内时，用户查看Word后无需填写实际页数即可继续交付；只有用户发现WPS实际页数不足或超出时，才填写实际页数。服务会将WPS实际页数与本批原始预计页数写入项目级校准记录，后续批次自动使用该项目的实测比例修正预计页数；校准只改善预判，不替代WPS最终事实。服务会自动撤销该批“已交付”状态，生成`revision`事件并明确要求“扩充”或“压缩”，当前AI必须读取事件，执行`python3 scripts/bid_delivery_ui/begin_revision.py <project_dir> --batch <batch_id>`，针对章节实质性修改、重新导出并再次登记。若事件标记`replan_required: true`，必须先复核本批目录和章节粒度，禁止直接连续追加独立模块；需要改变一至三级骨架时回到阶段2确认。重新交付的文件名依次增加`—审校版1`、`—审校版2`等后缀，用户可重复审阅，直到确认最终版本。
 
-**逐批阻塞是强制链路，不是聊天提醒：** 每批登记为`ready_for_review`后，当前AI必须立即以前台方式运行`python3 scripts/bid_delivery_ui/server.py <project_dir> --wait-only --wait-event user-action --wait-timeout 0`，并保持该命令运行；用户点击“确认并交付本批Word”后，该命令返回，AI须在同一持续对话中读取事件、生成下一批或应用AI回修并再次进入同一等待命令。`batch-confirmed`、`image-plan-confirmed`、`revision`和`final-confirmed`都是继续当前任务的事件，绝不是结束任务的信号。严禁在首批生成后以“请确认后再告诉我”“我将继续下一批”结束对话，也严禁把等待改成后台任务。
+**逐批阻塞是强制链路，不是聊天提醒：** 每批登记为`ai_rechecking`后，当前AI必须立即完成复校并登记`passed`回执；批次进入`ready_for_review`后，再以前台方式运行`python3 scripts/bid_delivery_ui/server.py <project_dir> --wait-only --wait-event user-action --wait-timeout 0`，并保持该命令运行。用户点击“确认并交付本批Word”后，该命令返回，AI须在同一持续对话中读取事件、生成下一批或应用AI回修并再次导出、复校、进入同一等待命令。`batch-confirmed`、`image-plan-confirmed`、`revision`和`final-confirmed`都是继续当前任务的事件，绝不是结束任务的信号。严禁在首批生成后以“请确认后再告诉我”“我将继续下一批”结束对话，也严禁把等待改成后台任务。
 
 **宿主超时适配：** 某些AI宿主会在约两分钟后强制将前台命令转入后台。遇到这种转移时，当前AI必须立刻继续轮询或重新运行上述无限等待命令，且不发送收尾总结、不标记任务完成、不要求用户重新唤醒对话。只有读取到有效`final-confirmed`回执并完成交付汇总后，才允许结束本次对话。
 
-当前生产与审校台已进一步支持两类受控审校：用户可对正文、列表、表格及图片规划记录做确定性直接修改，或提交需当前AI判断的改写请求；页数超差也沿用同一前台事件链。浏览器只将AI请求保存为项目目录下的请求和结果，不调用任何模型；**人工直接修改由本地服务立即同步并确定性重导出，不得唤醒AI或要求AI进行二次思考**。AI收到改写请求或页数超差事件后必须核对当前源稿哈希，再写入结果、更新源稿并重新导出，严禁用旧请求覆盖新版本。
+当前生产与审校台已进一步支持两类受控审校：用户可对正文、列表、表格及图片规划记录做确定性直接修改，或提交需当前AI判断的改写请求；页数超差也沿用同一前台事件链。浏览器只将AI请求保存为项目目录下的请求和结果，不调用任何模型；人工直接修改由本地服务同步保存并确定性重导出，但导出后批次仍会重新进入AI复校，未通过前不得继续人工审阅或确认。AI收到改写请求或页数超差事件后必须核对当前源稿哈希，再写入结果、更新源稿、重新导出并复校，严禁用旧请求覆盖新版本。
 
 图片规划Excel固定只输出1份、1个工作表，使用阶段3已确认的“图片名称、位置、核心表达、核心节点、构图建议和视觉要求”，并增加每张图的`AI生图提示词`。Excel是交给其他AI或最终交付后本机生图流程的输入，不得包含成图路径、成图状态或图片二进制；G0至G7不调用生图接口，也不插图。最终交付后的可选本机生图必须遵循[最终交付后生图协议](references/post-delivery-image-generation.md)。`scripts/bid_delivery_ui/export_image_plan.py`固定使用`openpyxl`导出，确保不同AI宿主获得相同的Excel；`@oai/artifact-tool`仅可在显式设置`BIAOSHU_USE_ARTIFACT_TOOL=1`时作为增强器使用，绝不构成依赖。
 
@@ -288,6 +302,7 @@ Stage4写作不是“拿到资料后自由发挥”。正式生成任何正文�
 - 标题编号、层级和颗粒度自然；
 - 阶段2确认的一至三级骨架完整且顺序一致；新增深层标题均有明确父级，三级和四级密度不超过7个；
 - 已读取项目内Stage4标书生成规则，源稿写入的`writing_rules_sha256`与`manifest.json`一致；
+- AI复校报告完整绑定当前Stage4授权、规则快照、源稿和Word摘要，`status`为`passed`且无`blocking`问题；
 - 本地预计页数不低于计划页数的90%，实际WPS页数在计划页数±10%内；
 - 字体、字号、缩进、行距、表格；
 - 评分覆盖；

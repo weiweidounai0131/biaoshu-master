@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>最终交付确认 · 标书确认台</title>
-  <link rel="stylesheet" href="/final.css?v=4">
+  <link rel="stylesheet" href="/final.css?v=5">
   <link rel="stylesheet" href="/workflow-shared.css?v=2">
 </head>
 <body data-page-stage="stage4">
@@ -40,6 +40,12 @@
         <article class="delivery-card word-card">
           <div class="delivery-head"><div><span>交付物 A</span><h2>Word技术服务标书</h2><p>选择生成批次，最终Word文件数量必须与这里一致。</p></div><div class="format-chip">.DOCX</div></div>
           <div class="batch-selector"><strong>分几次生成？</strong><small>最少1次，最多5次</small><div class="batch-options" id="batch-options"></div></div>
+          <div class="rule-selector">
+            <div class="rule-selector-head"><div><strong>生成规则</strong><small>默认使用通用政企标书规则，也可选择领域规则覆盖层。</small></div><span class="rule-badge">Stage4</span></div>
+            <select id="generation-rule" aria-label="选择标书生成规则"></select>
+            <div class="rule-description"><strong id="generation-rule-name">—</strong><p id="generation-rule-description">正在读取规则说明…</p></div>
+            <div class="rule-actions"><span id="generation-rule-default-state">—</span><button type="button" id="set-default-rule">设为默认</button><button type="button" id="new-rule">新建专属规则</button></div>
+          </div>
           <div class="recommendation"><span>AI建议</span><p id="batch-reason">正在计算合适批次…</p></div>
           <div class="batch-list" id="batch-list"></div>
           <div class="delivery-location">
@@ -68,10 +74,11 @@
 
   <div class="toast" id="toast"></div>
   <div class="modal" id="reopen-modal" hidden><div class="modal-card"><div class="warning-mark">!</div><h2>修改最终交付方案？</h2><p>确认后只重新开启本页。项目口径、标书框架和图片规划保持不变；此前最终授权回执将归档。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改</button></div></div></div>
+  <div class="modal" id="rule-create-modal" hidden><div class="modal-card rule-modal-card"><div class="rule-modal-mark">R</div><h2>新建专属生成规则</h2><p>请在当前对话中输出下面这句话，Skill 会切换到“专属规则制作”流程，不会开始标书生成。</p><textarea id="custom-rule-prompt" rows="3" readonly>请用biaoshu-master技能，帮我制作专属的标书生成规则</textarea><div class="modal-actions"><button id="close-rule-modal">关闭</button><button class="danger-confirm" id="copy-rule-prompt">复制这句话</button></div></div></div>
   <div class="modal" id="success-modal" hidden><div class="modal-card success-card"><div class="check">✓</div><h2>最终方案已授权</h2><p id="success-copy">交付物数量和边界已经锁定。</p><div class="next-status" id="production-status"><span class="spinner"></span>当前对话中的AI正在读取授权并初始化交付工作台</div><button id="close-success">留在当前页面检查</button></div></div>
   <script src="/workflow-shared.js?v=1"></script>
   <script src="/workflow-nav.js?v=1"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/final.js?v=10"></script>
+  <script src="/final.js?v=11"></script>
 </body>
 </html>

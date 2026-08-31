@@ -76,6 +76,12 @@ VISUAL_DIRECTION_TEXT_KEYS: dict[str, tuple[str, ...]] = {
 }
 VISUAL_DIRECTION_AVOID_KEYS = ("avoid", "avoid_styles", "avoid_style", "negative_prompt", "avoid_visuals", "avoid_visual_features", "避免的风格", "应避免", "避免")
 
+SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+import rule_profiles
+
 
 def canonical_json(data: Any) -> bytes:
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1352,7 +1358,7 @@ def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_coun
     if not isinstance(data, dict):
         raise ValueError("stage4 data must be an object")
     required = {"word_batch_count", "word_batches", "image_plan_workbook", "skill_boundary", "additional_notes"}
-    allowed = required | {"delivery_output_dir"}
+    allowed = required | {"delivery_output_dir", "generation_rule"}
     if not required.issubset(data) or not set(data).issubset(allowed):
         raise ValueError("stage4 data fields are incomplete or unsupported")
     batch_count = data.get("word_batch_count")
@@ -1433,6 +1439,8 @@ def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_coun
         raise ValueError("additional_notes must be a string")
     if "delivery_output_dir" in data and not isinstance(data.get("delivery_output_dir"), str):
         raise ValueError("交付物保存位置必须是文本")
+    if "generation_rule" in data:
+        rule_profiles.validate_selection(data["generation_rule"])
 
 
 def validate_delivery_output_dir(data: dict[str, Any]) -> str:
@@ -1501,7 +1509,10 @@ def stage4_confirmation_valid(data_dir: Path) -> tuple[dict[str, Any], dict[str,
         return None
     if receipt.get("source_sha256") != sha256_data(source) or not confirmation_digest_valid(receipt):
         return None
-    validate_delivery_plan(receipt.get("data"), chapters, len(stage3_receipt.get("data", {}).get("images", [])))
+    try:
+        validate_delivery_plan(receipt.get("data"), chapters, len(stage3_receipt.get("data", {}).get("images", [])))
+    except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError):
+        return None
     return source, stage3_receipt, receipt
 
 
@@ -1629,6 +1640,12 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/delivery-status":
             self.send_json({"ok": True, **delivery_status(self.server.project_dir)})
+            return
+        if self.path == "/api/generation-rules":
+            try:
+                self.send_json({"ok": True, "generation_rules": rule_profiles.list_profiles()})
+            except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
             return
         if self.path == "/api/intake":
             try:
@@ -1816,6 +1833,9 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/stage4/confirm":
             self.confirm_stage4()
+            return
+        if self.path == "/api/generation-rules/default":
+            self.set_generation_rule_default()
             return
         if self.path == "/api/stage1/reopen":
             self.reopen_stage1()
@@ -2254,7 +2274,10 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
                 raise ValueError("最终交付建议已经变化，请刷新后重新确认")
             data = payload.get("data")
             image_count = len(stage3_receipt.get("data", {}).get("images", []))
+            if "generation_rule" not in data:
+                data["generation_rule"] = rule_profiles.default_selection()
             validate_delivery_plan(data, chapters, image_count)
+            rule_profiles.validate_selection(data["generation_rule"])
             data["delivery_output_dir"] = validate_delivery_output_dir(data)
             receipt = {
                 "schema_version": 1,
@@ -2374,6 +2397,19 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             self.send_json({"ok": True, "paths": choose_local_paths(str(payload.get("kind", "files")))})
         except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+
+    def set_generation_rule_default(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 10_000:
+                raise ValueError("规则默认设置请求无效")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("规则默认设置请求必须是对象")
+            profile = rule_profiles.set_default(payload.get("id"))
+            self.send_json({"ok": True, "default_profile": profile})
+        except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
             self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
 
 

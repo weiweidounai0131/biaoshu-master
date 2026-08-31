@@ -27,6 +27,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from bid_confirm_ui import server as confirm_ui
+import rule_profiles
 from bid_delivery_ui.image_prompt import compose_ai_image_prompt, prompt_for_image
 
 
@@ -45,6 +46,7 @@ LOCK_NAME = "lock.json"
 PROJECT_STATUSES = {
     "preparing",
     "generating",
+    "ai_rechecking",
     "awaiting_batch_review",
     "revision_pending",
     "revising",
@@ -57,6 +59,7 @@ PROJECT_STATUSES = {
 BATCH_STATUSES = {
     "pending",
     "generating",
+    "ai_rechecking",
     "ready_for_review",
     "revision_pending",
     "regenerating",
@@ -77,6 +80,17 @@ SOURCE_BLOCK_TYPES = {
     "image_placeholder",
     "material_placeholder",
     "page_break",
+}
+AI_RECHECK_STATUSES = {"running", "passed", "failed"}
+AI_RECHECK_SEVERITIES = {"blocking", "warning", "info"}
+AI_RECHECK_REQUIRED_SCOPE = {
+    "writing_rules",
+    "project_facts",
+    "outline_scoring",
+    "duplicate_control",
+    "cross_batch_consistency",
+    "word_export",
+    "page_budget",
 }
 MAX_READER_BLOCKS = 80
 PAGE_TOLERANCE = 0.10
@@ -186,9 +200,11 @@ def _read_writing_rules_source() -> tuple[bytes, str]:
     return data, hashlib.sha256(data).hexdigest()
 
 
-def snapshot_writing_rules(project_dir: Path, expected_source_sha256: str | None = None, *, overwrite: bool = False) -> dict[str, str]:
-    """Materialize the skill rules into the authorized project workspace."""
-    data, source_sha256 = _read_writing_rules_source()
+def snapshot_writing_rules(project_dir: Path, expected_source_sha256: str | None = None, *, overwrite: bool = False, generation_rule: dict[str, Any] | None = None) -> dict[str, str]:
+    """Materialize the base rules plus the selected local overlay."""
+    selection = rule_profiles.default_selection() if generation_rule is None else rule_profiles.validate_selection(generation_rule)
+    data, profile = rule_profiles.effective_rule_bytes(selection["id"])
+    source_sha256 = profile["effective_sha256"]
     if expected_source_sha256 is not None and source_sha256 != expected_source_sha256:
         raise ValueError("Skill内Stage4标书生成规则已变化，不能继续使用旧授权")
     target = writing_rules_path(project_dir)
@@ -197,17 +213,31 @@ def snapshot_writing_rules(project_dir: Path, expected_source_sha256: str | None
     project_sha256 = sha256_file(target)
     if project_sha256 != source_sha256:
         raise ValueError("项目内Stage4标书生成规则快照写入失败")
-    return {"path": WRITING_RULES_FILE, "source_sha256": source_sha256, "project_sha256": project_sha256}
+    return {
+        "path": WRITING_RULES_FILE,
+        "source_sha256": source_sha256,
+        "project_sha256": project_sha256,
+        "profile_id": profile["id"],
+        "profile_sha256": profile["sha256"],
+        "base_sha256": profile["base_sha256"],
+    }
 
 
 def _validate_writing_rules_metadata(project_dir: Path | None, metadata: Any) -> None:
     if not isinstance(metadata, dict):
         raise ValueError("Stage4标书生成规则状态无效")
-    _require_exact_keys(metadata, {"path", "source_sha256", "project_sha256"}, "Stage4标书生成规则状态")
+    legacy_keys = {"path", "source_sha256", "project_sha256"}
+    profile_keys = legacy_keys | {"profile_id", "profile_sha256", "base_sha256"}
+    if set(metadata) != legacy_keys and set(metadata) != profile_keys:
+        raise ValueError("Stage4标书生成规则状态 fields are invalid")
     if _require_relative_path(metadata.get("path"), "Stage4标书生成规则路径") != WRITING_RULES_FILE:
         raise ValueError("Stage4标书生成规则路径无效")
     _require_sha256(metadata.get("source_sha256"), "Skill标书生成规则摘要")
     _require_sha256(metadata.get("project_sha256"), "项目标书生成规则摘要")
+    if set(metadata) == profile_keys:
+        profile = rule_profiles.profile_descriptor(metadata.get("profile_id"))
+        if metadata.get("profile_sha256") != profile["sha256"] or metadata.get("base_sha256") != profile["base_sha256"] or metadata.get("source_sha256") != profile["effective_sha256"]:
+            raise ValueError("项目内Stage4规则配置已变化，请重新授权")
     if project_dir is not None:
         target = writing_rules_path(project_dir)
         if not target.is_file() or sha256_file(target) != metadata["project_sha256"]:
@@ -363,10 +393,13 @@ def _batch_manifest_item(batch: dict[str, Any]) -> dict[str, Any]:
 
 def build_manifest(project_dir: Path) -> dict[str, Any]:
     recommendation, receipt, _chapters = _load_stage4_authorization(project_dir)
-    _rules_data, rules_sha256 = _read_writing_rules_source()
     delivery = receipt.get("data")
     if not isinstance(delivery, dict):
         raise ValueError("最终交付授权缺少交付配置")
+    raw_generation_rule = delivery.get("generation_rule")
+    generation_rule = rule_profiles.default_selection() if raw_generation_rule is None else rule_profiles.validate_selection(raw_generation_rule)
+    _rules_data, rules_profile = rule_profiles.effective_rule_bytes(generation_rule["id"])
+    rules_sha256 = rules_profile["effective_sha256"]
     batches = delivery.get("word_batches")
     if not isinstance(batches, list) or not batches:
         raise ValueError("最终交付授权缺少Word批次")
@@ -382,10 +415,14 @@ def build_manifest(project_dir: Path) -> dict[str, Any]:
         "project_id": receipt["project_id"],
         "stage4_confirmation_sha256": receipt["confirmation_sha256"],
         "stage4_source_sha256": receipt["source_sha256"],
+        "generation_rule": generation_rule,
         "writing_rules": {
             "path": WRITING_RULES_FILE,
             "source_sha256": rules_sha256,
             "project_sha256": rules_sha256,
+            "profile_id": rules_profile["id"],
+            "profile_sha256": rules_profile["sha256"],
+            "base_sha256": rules_profile["base_sha256"],
         },
         "created_at": now,
         "updated_at": now,
@@ -446,7 +483,7 @@ def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None)
         "created_at", "updated_at", "status", "active_batch_id", "word_batch_count", "delivery_output_dir", "word_batches",
         "image_plan_workbook", "final_confirmation_sha256", "pending_request_count", "last_event_id",
     }
-    optional = {"writing_rules"}
+    optional = {"writing_rules", "generation_rule"}
     missing = expected - set(manifest)
     extra = set(manifest) - expected - optional
     if missing or extra:
@@ -461,6 +498,8 @@ def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None)
     _require_nonempty_string(manifest.get("project_id"), "项目ID")
     _require_sha256(manifest.get("stage4_confirmation_sha256"), "最终授权摘要")
     _require_sha256(manifest.get("stage4_source_sha256"), "最终授权来源摘要")
+    if "generation_rule" in manifest:
+        rule_profiles.validate_selection(manifest["generation_rule"])
     if "writing_rules" in manifest:
         _validate_writing_rules_metadata(project_dir, manifest["writing_rules"])
     _require_sha256(manifest.get("final_confirmation_sha256"), "最终交付确认摘要", nullable=True)
@@ -515,8 +554,12 @@ def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None)
         if manifest["stage4_source_sha256"] != sha256_data(recommendation):
             raise ValueError("最终交付建议已经变化，当前交付清单不能继续使用")
         for batch in batches:
-            if batch["status"] in {"ready_for_review", "revision_pending", "confirmed"}:
+            if batch["status"] in {"ready_for_review", "revision_pending", "confirmed", "ai_rechecking"}:
                 _require_recorded_artifacts(project_dir, batch)
+            if batch["status"] == "ai_rechecking":
+                report = _load_ai_recheck(project_dir, manifest, batch, allow_running=True)
+                if report.get("status") != "running":
+                    raise ValueError("AI复校状态必须对应运行中的复校报告")
             if batch["status"] == "confirmed":
                 _require_batch_confirmation(project_dir, manifest, batch)
             elif batch["status"] == "export_pending":
@@ -541,6 +584,9 @@ def _validate_state_consistency(manifest: dict[str, Any]) -> None:
     elif status == "generating":
         if not active or active["status"] != "generating":
             raise ValueError("生成状态必须指向正在生成的Word批次")
+    elif status == "ai_rechecking":
+        if not active or active["status"] != "ai_rechecking":
+            raise ValueError("AI复校状态必须指向正在复校的Word批次")
     elif status == "awaiting_batch_review":
         if not active or active["status"] != "ready_for_review":
             raise ValueError("审校状态必须指向待审校Word批次")
@@ -577,13 +623,19 @@ def load_manifest(project_dir: Path) -> dict[str, Any]:
     manifest = read_json(path)
     # A pre-location manifest remains readable so that an already-open project
     # can be reopened at stage 4 and explicitly select its delivery folder.
+    changed = False
     if "delivery_output_dir" not in manifest:
         manifest["delivery_output_dir"] = ""
-        atomic_write_json(path, manifest)
+        changed = True
     if "writing_rules" not in manifest:
         # Migrate an older authorized workspace without discarding its source
         # or export history. New batches will carry the snapshot hash.
-        manifest["writing_rules"] = snapshot_writing_rules(project_dir, overwrite=True)
+        manifest["writing_rules"] = snapshot_writing_rules(project_dir, overwrite=True, generation_rule=manifest.get("generation_rule"))
+        changed = True
+    if "generation_rule" not in manifest:
+        manifest["generation_rule"] = rule_profiles.default_selection()
+        changed = True
+    if changed:
         atomic_write_json(path, manifest)
     validate_manifest(manifest, project_dir)
     return manifest
@@ -602,7 +654,7 @@ def initialize_delivery(project_dir: Path) -> tuple[dict[str, Any], bool]:
     manifest = build_manifest(project_dir)
     validate_manifest(manifest)
     ensure_delivery_dirs(project_dir)
-    manifest["writing_rules"] = snapshot_writing_rules(project_dir, manifest["writing_rules"]["source_sha256"], overwrite=True)
+    manifest["writing_rules"] = snapshot_writing_rules(project_dir, manifest["writing_rules"]["source_sha256"], overwrite=True, generation_rule=manifest.get("generation_rule"))
     atomic_write_json(path, manifest)
     return manifest, True
 
@@ -684,6 +736,10 @@ def _final_confirmation_path(project_dir: Path) -> Path:
 
 def _image_plan_confirmation_path(project_dir: Path) -> Path:
     return _safe_delivery_file(project_dir, f"{CONFIRMATIONS_DIR_NAME}/image-plan-confirmation.json")
+
+
+def _ai_recheck_path(project_dir: Path, batch: dict[str, Any]) -> Path:
+    return _safe_delivery_file(project_dir, f"{RESULTS_DIR_NAME}/ai-recheck-batch-{batch['order']:02d}.json")
 
 
 def _archive_confirmation(path: Path, project_dir: Path, label: str) -> None:
@@ -828,6 +884,182 @@ def _require_string_list(value: Any, label: str, *, allow_empty: bool = False) -
     for item in value:
         cleaned.append(_require_nonempty_string(item, label))
     return cleaned
+
+
+def _ai_recheck_summary() -> dict[str, int]:
+    return {
+        "checked_blocks": 0,
+        "checked_paragraphs": 0,
+        "checked_sections": 0,
+        "blocking_findings": 0,
+        "warning_findings": 0,
+        "info_findings": 0,
+    }
+
+
+def _ai_recheck_placeholder(manifest: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": "bid_delivery_ai_recheck",
+        "status": "running",
+        "project_id": manifest["project_id"],
+        "batch_id": batch["id"],
+        "batch_order": batch["order"],
+        "stage4_confirmation_sha256": manifest["stage4_confirmation_sha256"],
+        "source_sha256": batch["source_sha256"],
+        "export_sha256": batch["export_sha256"],
+        "writing_rules_sha256": manifest["writing_rules"]["project_sha256"],
+        "checked_at": utc_now(),
+        "checker": "等待当前AI复校",
+        "rules_read": False,
+        "scope": [],
+        "summary": _ai_recheck_summary(),
+        "findings": [],
+    }
+
+
+def validate_ai_recheck_report(report: dict[str, Any], manifest: dict[str, Any], batch: dict[str, Any], *, allow_running: bool = True) -> None:
+    """Validate a host-generated AI recheck without making a model call.
+
+    The current AI supplies the semantic judgment; this protocol only accepts
+    a complete, hash-bound result and enforces that blocking findings cannot be
+    reported as passed.
+    """
+
+    expected = {
+        "schema_version", "kind", "status", "project_id", "batch_id", "batch_order",
+        "stage4_confirmation_sha256", "source_sha256", "export_sha256", "writing_rules_sha256",
+        "checked_at", "checker", "rules_read", "scope", "summary", "findings",
+    }
+    _require_exact_keys(report, expected, "AI复校报告")
+    if report.get("schema_version") != SCHEMA_VERSION or report.get("kind") != "bid_delivery_ai_recheck":
+        raise ValueError("AI复校报告版本不支持")
+    status = report.get("status")
+    allowed_statuses = AI_RECHECK_STATUSES if allow_running else {"passed", "failed"}
+    if status not in allowed_statuses:
+        raise ValueError("AI复校报告状态无效")
+    if report.get("project_id") != manifest["project_id"] or report.get("batch_id") != batch["id"] or report.get("batch_order") != batch["order"]:
+        raise ValueError("AI复校报告项目或批次不匹配")
+    if report.get("stage4_confirmation_sha256") != manifest["stage4_confirmation_sha256"]:
+        raise ValueError("AI复校报告未绑定当前最终授权")
+    if report.get("source_sha256") != batch.get("source_sha256") or report.get("export_sha256") != batch.get("export_sha256"):
+        raise ValueError("AI复校报告未绑定当前源稿和Word")
+    if report.get("writing_rules_sha256") != manifest["writing_rules"]["project_sha256"]:
+        raise ValueError("AI复校报告未绑定当前标书生成规则")
+    _require_nonempty_string(report.get("checked_at"), "AI复校时间")
+    _require_nonempty_string(report.get("checker"), "AI复校执行者")
+    if not isinstance(report.get("rules_read"), bool):
+        raise ValueError("AI复校报告 rules_read 必须是布尔值")
+    scope = _require_string_list(report.get("scope"), "AI复校范围", allow_empty=status == "running")
+    if len(scope) != len(set(scope)):
+        raise ValueError("AI复校范围不能重复")
+    if status in {"passed", "failed"} and (not scope or report.get("rules_read") is not True):
+        raise ValueError("AI复校完成报告必须声明已读取规则并填写复校范围")
+    if status in {"passed", "failed"} and not AI_RECHECK_REQUIRED_SCOPE.issubset(set(scope)):
+        missing_scope = "、".join(sorted(AI_RECHECK_REQUIRED_SCOPE - set(scope)))
+        raise ValueError(f"AI复校范围缺少：{missing_scope}")
+    summary = report.get("summary")
+    if not isinstance(summary, dict):
+        raise ValueError("AI复校摘要必须是对象")
+    summary_keys = {"checked_blocks", "checked_paragraphs", "checked_sections", "blocking_findings", "warning_findings", "info_findings"}
+    _require_exact_keys(summary, summary_keys, "AI复校摘要")
+    for key in summary_keys:
+        _require_positive_int(summary.get(key), f"AI复校摘要 {key}", allow_zero=True)
+
+    findings = report.get("findings")
+    if not isinstance(findings, list):
+        raise ValueError("AI复校问题清单必须是列表")
+    finding_keys = {"id", "severity", "category", "location", "description", "evidence", "resolution"}
+    counts = {"blocking": 0, "warning": 0, "info": 0}
+    finding_ids: set[str] = set()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            raise ValueError("AI复校问题必须是对象")
+        _require_exact_keys(finding, finding_keys, "AI复校问题")
+        finding_id = _require_nonempty_string(finding.get("id"), "AI复校问题ID")
+        if finding_id in finding_ids:
+            raise ValueError("AI复校问题ID重复")
+        finding_ids.add(finding_id)
+        severity = _require_nonempty_string(finding.get("severity"), "AI复校问题级别")
+        if severity not in AI_RECHECK_SEVERITIES:
+            raise ValueError("AI复校问题级别无效")
+        counts[severity] += 1
+        category = _require_nonempty_string(finding.get("category"), "AI复校问题类别")
+        if category not in AI_RECHECK_REQUIRED_SCOPE:
+            raise ValueError("AI复校问题类别必须属于复校范围")
+        _require_nonempty_string(finding.get("location"), "AI复校问题位置")
+        _require_nonempty_string(finding.get("description"), "AI复校问题说明")
+        _require_string_list(finding.get("evidence"), "AI复校问题证据")
+        _require_nonempty_string(finding.get("resolution"), "AI复校问题处理建议")
+    if summary["blocking_findings"] != counts["blocking"] or summary["warning_findings"] != counts["warning"] or summary["info_findings"] != counts["info"]:
+        raise ValueError("AI复校摘要数量与问题清单不一致")
+    if status in {"passed", "failed"} and summary["checked_blocks"] < 1:
+        raise ValueError("AI复校完成报告未覆盖正文内容")
+    if status == "passed" and counts["blocking"]:
+        raise ValueError("存在阻断问题时不能将AI复校标记为通过")
+    if status == "failed" and not counts["blocking"]:
+        raise ValueError("AI复校失败必须至少包含一个阻断问题")
+
+
+def _load_ai_recheck(project_dir: Path, manifest: dict[str, Any], batch: dict[str, Any], *, allow_running: bool = True) -> dict[str, Any]:
+    path = _ai_recheck_path(project_dir, batch)
+    if not path.is_file():
+        raise ValueError("当前Word批次缺少AI复校报告")
+    report = read_json(path)
+    validate_ai_recheck_report(report, manifest, batch, allow_running=allow_running)
+    return report
+
+
+def _require_ai_recheck_passed(project_dir: Path, manifest: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+    report = _load_ai_recheck(project_dir, manifest, batch, allow_running=True)
+    if report.get("status") != "passed":
+        raise ValueError("AI复校尚未通过，不能进入人工审校或确认")
+    return report
+
+
+def _start_ai_recheck(project_dir: Path, manifest: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+    path = _ai_recheck_path(project_dir, batch)
+    if path.exists():
+        history_path = _safe_delivery_file(project_dir, f"{HISTORY_DIR_NAME}/ai-recheck-batch-{batch['order']:02d}-{int(time.time() * 1000)}.json")
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(path, history_path)
+    report = _ai_recheck_placeholder(manifest, batch)
+    atomic_write_json(path, report)
+    return report
+
+
+def _ai_recheck_coverage(source: dict[str, Any]) -> dict[str, int]:
+    return {
+        "checked_blocks": len(source["blocks"]),
+        "checked_paragraphs": sum(1 for block in source["blocks"] if block["type"] == "paragraph"),
+        "checked_sections": len(source["chapters"]),
+    }
+
+
+def record_ai_recheck(project_dir: Path, batch_id: str, report: dict[str, Any]) -> dict[str, Any]:
+    """Record the current AI's completed semantic recheck and advance the gate."""
+    manifest = load_manifest(project_dir)
+    batch = _batch_by_id(manifest, batch_id)
+    if manifest["status"] != "ai_rechecking" or batch["status"] != "ai_rechecking":
+        raise ValueError("当前Word批次不在AI复校状态，不能登记复校结果")
+    _require_recorded_artifacts(project_dir, batch)
+    source = _require_recorded_source(project_dir, batch, manifest)
+    validate_ai_recheck_report(report, manifest, batch, allow_running=False)
+    coverage = _ai_recheck_coverage(source)
+    summary = report["summary"]
+    for key in ("checked_blocks", "checked_paragraphs", "checked_sections"):
+        if summary[key] < coverage[key]:
+            raise ValueError(f"AI复校报告未覆盖全部{key.replace('checked_', '')}")
+    path = _ai_recheck_path(project_dir, batch)
+    atomic_write_json(path, report)
+    if report["status"] == "passed":
+        batch["status"] = "ready_for_review"
+        manifest["status"] = "awaiting_batch_review"
+    else:
+        batch["status"] = "regenerating"
+        manifest["status"] = "revising"
+    updated = _write_manifest(project_dir, manifest)
+    return {"manifest": updated, "report": report, "report_path": str(path)}
 
 
 def _require_table_rows(value: Any, columns: list[str]) -> list[list[str]]:
@@ -1277,16 +1509,16 @@ def validate_image_plan_source(source: dict[str, Any], manifest: dict[str, Any],
 def load_batch_source(project_dir: Path, batch_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     manifest = load_manifest(project_dir)
     batch = _batch_by_id(manifest, batch_id)
-    if batch["status"] not in {"ready_for_review", "revision_pending", "confirmed", "export_pending"}:
+    if batch["status"] not in {"ready_for_review", "confirmed"}:
         raise ValueError("当前Word批次尚未生成可审校内容")
-    source = _require_recorded_source(project_dir, batch, manifest) if batch["status"] == "export_pending" else None
-    if source is None:
-        _require_recorded_artifacts(project_dir, batch)
-        source_path = _safe_delivery_file(project_dir, batch["source_path"])
-        source = read_json(source_path)
-        validate_batch_source(source, manifest, batch)
-        validate_source_against_confirmed_outline(project_dir, source, batch)
-        validate_batch_image_alignment(project_dir, source, batch)
+    _require_recorded_artifacts(project_dir, batch)
+    if batch["status"] == "ready_for_review":
+        _require_ai_recheck_passed(project_dir, manifest, batch)
+    source_path = _safe_delivery_file(project_dir, batch["source_path"])
+    source = read_json(source_path)
+    validate_batch_source(source, manifest, batch)
+    validate_source_against_confirmed_outline(project_dir, source, batch)
+    validate_batch_image_alignment(project_dir, source, batch)
     return manifest, batch, source
 
 
@@ -1296,6 +1528,7 @@ def batch_reader_payload(project_dir: Path, batch_id: str, offset: int = 0, limi
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_READER_BLOCKS:
         raise ValueError(f"每次最多读取{MAX_READER_BLOCKS}个内容块")
     manifest, batch, source = load_batch_source(project_dir, batch_id)
+    ai_recheck = _ai_recheck_overview(project_dir, manifest, batch)
     blocks = source["blocks"]
     slice_end = min(offset + limit, len(blocks))
     validation_page: dict[str, Any] = {}
@@ -1310,6 +1543,7 @@ def batch_reader_payload(project_dir: Path, batch_id: str, offset: int = 0, limi
             "chapter_titles": batch["chapter_titles"], "planned_pages": batch["planned_pages"],
             "actual_pages": source["actual_pages"], "status": batch["status"], "source_version": source["source_version"],
             "source_sha256": batch["source_sha256"], "export_filename": batch["output_filename"],
+            "ai_recheck": ai_recheck,
             "page_verification": validation_page,
             "page_bounds": {"min": lower_bound, "max": upper_bound},
         },
@@ -1332,6 +1566,15 @@ def batch_validation_payload(project_dir: Path, batch_id: str) -> dict[str, Any]
     if validation.get("source_sha256") != batch["source_sha256"] or validation.get("export_sha256") != batch["export_sha256"]:
         raise ValueError("当前Word批次导出校验记录已过期")
     return {"batch_id": batch_id, "validation": validation, "read_only": True}
+
+
+def ai_recheck_payload(project_dir: Path, batch_id: str) -> dict[str, Any]:
+    manifest = load_manifest(project_dir)
+    batch = _batch_by_id(manifest, batch_id)
+    report = _load_ai_recheck(project_dir, manifest, batch, allow_running=True)
+    if batch["status"] in {"regenerating", "revision_pending", "export_pending"} and report.get("status") == "passed":
+        return {"batch_id": batch_id, "status": "not_started", "report": None, "read_only": True}
+    return {"batch_id": batch_id, "status": report["status"], "report": report, "read_only": True}
 
 
 def _validated_word_check(project_dir: Path, manifest: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
@@ -1361,6 +1604,7 @@ def record_wps_page_check(project_dir: Path, batch_id: str, actual_pages: int, v
         raise ValueError("最终交付已确认，不能再登记页数或开启审校版")
     if batch["status"] not in {"ready_for_review", "confirmed"}:
         raise ValueError("当前Word批次不能登记WPS页数")
+    _require_ai_recheck_passed(project_dir, manifest, batch)
     pages = _require_positive_int(actual_pages, "WPS实际页数")
     actor = _require_nonempty_string(verifier, "WPS校验执行者")
     validation = _validated_word_check(project_dir, manifest, batch)
@@ -1438,6 +1682,7 @@ def _final_inputs_ready(project_dir: Path, manifest: dict[str, Any]) -> bool:
             if batch["status"] != "confirmed":
                 return False
             _require_recorded_artifacts(project_dir, batch)
+            _require_ai_recheck_passed(project_dir, manifest, batch)
             _require_batch_confirmation(project_dir, manifest, batch)
             page = _validated_word_check(project_dir, manifest, batch).get("page_verification", {})
             lower_bound, upper_bound = page_bounds(batch["planned_pages"])
@@ -1459,7 +1704,7 @@ def final_delivery_payload(project_dir: Path) -> dict[str, Any]:
     manifest = load_manifest(project_dir)
     entries: list[dict[str, Any]] = []
     for batch in manifest["word_batches"]:
-        item: dict[str, Any] = {"batch_id": batch["id"], "filename": batch["output_filename"], "status": batch["status"], "ready": False, "detail": "尚未确认"}
+        item: dict[str, Any] = {"batch_id": batch["id"], "filename": batch["output_filename"], "status": batch["status"], "ready": False, "detail": "尚未确认", "ai_recheck": _ai_recheck_overview(project_dir, manifest, batch)}
         if batch["status"] == "confirmed":
             try:
                 validation = _validated_word_check(project_dir, manifest, batch)
@@ -1497,6 +1742,48 @@ def final_delivery_payload(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def _ai_recheck_overview(project_dir: Path, manifest: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, display-safe status for the delivery overview."""
+    base = {
+        "status": "not_started",
+        "detail": "当前批次尚未完成Word导出，暂未开始AI复校",
+        "summary": _ai_recheck_summary(),
+        "checked_at": None,
+        "report_path": f"{RESULTS_DIR_NAME}/ai-recheck-batch-{batch['order']:02d}.json",
+    }
+    if batch["status"] in {"pending", "generating"}:
+        return base
+    try:
+        report = _load_ai_recheck(project_dir, manifest, batch, allow_running=True)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        base.update({"status": "invalid" if batch["status"] in {"ai_rechecking", "regenerating", "ready_for_review"} else "missing", "detail": str(exc)})
+        return base
+    summary = report["summary"]
+    status = report["status"]
+    if batch["status"] in {"regenerating", "revision_pending", "export_pending"} and status == "passed":
+        base.update({"status": "not_started", "detail": "当前批次正在生成修订版，上一轮AI复校结果不适用于新版本"})
+        return base
+    if status == "running":
+        detail = "AI复校中：正在核对规则、事实、目录、重复、跨批衔接和Word导出结果"
+    elif status == "passed":
+        detail = (
+            f"AI复校已通过：覆盖{summary['checked_blocks']}个内容块，"
+            f"发现{summary['warning_findings']}个提示项"
+        )
+    else:
+        detail = (
+            f"AI复校未通过：有{summary['blocking_findings']}个阻断问题，"
+            "当前AI修复并重新导出后才会再次复校"
+        )
+    return {
+        "status": status,
+        "detail": detail,
+        "summary": summary,
+        "checked_at": report["checked_at"],
+        "report_path": base["report_path"],
+    }
+
+
 def delivery_overview_payload(project_dir: Path) -> dict[str, Any]:
     """Return only display-safe metadata; do not load every long source file."""
     manifest = load_manifest(project_dir)
@@ -1506,10 +1793,12 @@ def delivery_overview_payload(project_dir: Path) -> dict[str, Any]:
         raise ValueError("最终交付推荐缺少项目摘要")
     batches: list[dict[str, Any]] = []
     for batch in manifest["word_batches"]:
-        readable = batch["status"] in {"ready_for_review", "revision_pending", "confirmed", "export_pending"}
+        ai_recheck = _ai_recheck_overview(project_dir, manifest, batch)
+        legacy_confirmed = batch["status"] == "confirmed" and ai_recheck["status"] in {"missing", "not_started"}
+        readable = batch["status"] in {"ready_for_review", "confirmed"} and (ai_recheck["status"] == "passed" or legacy_confirmed)
         wps_status = "not_available"
         actual_pages = None
-        if batch["status"] in {"ready_for_review", "confirmed"}:
+        if readable and batch["status"] in {"ready_for_review", "confirmed"}:
             try:
                 page = _validated_word_check(project_dir, manifest, batch).get("page_verification", {})
                 wps_status = str(page.get("status", "pending_wps_check"))
@@ -1519,7 +1808,8 @@ def delivery_overview_payload(project_dir: Path) -> dict[str, Any]:
         batches.append({
             "id": batch["id"], "order": batch["order"], "chapter_numbers": batch["chapter_numbers"],
             "chapter_titles": batch["chapter_titles"], "planned_pages": batch["planned_pages"],
-            "status": batch["status"], "readable": readable, "export_filename": batch["output_filename"],
+            "status": batch["status"], "display_status": batch["status"], "readable": readable,
+            "export_filename": batch["output_filename"], "ai_recheck": ai_recheck,
             "wps_status": wps_status, "actual_pages": actual_pages,
             "page_bounds": {"min": page_bounds(batch["planned_pages"])[0], "max": page_bounds(batch["planned_pages"])[1]},
         })
@@ -1594,6 +1884,7 @@ def apply_direct_edit(project_dir: Path, batch_id: str, block_id: str, expected_
         raise ValueError("当前批次已有修改，Word需重新导出后才能继续修改")
     if batch["status"] not in {"ready_for_review", "confirmed"}:
         raise ValueError("当前Word批次不能直接修改")
+    _require_ai_recheck_passed(project_dir, manifest, batch)
     source = _require_recorded_source(project_dir, batch, manifest)
     if expected_source_sha256 != batch["source_sha256"]:
         raise ValueError("源稿已更新，请刷新页面后再提交修改")
@@ -1661,6 +1952,7 @@ def create_ai_request(project_dir: Path, batch_id: str, block_id: str | None, ex
         raise ValueError("当前批次已有修改，Word需重新导出后才能提交AI修改")
     if batch["status"] not in {"ready_for_review", "confirmed"}:
         raise ValueError("当前Word批次不能提交AI修改")
+    _require_ai_recheck_passed(project_dir, manifest, batch)
     source = _require_recorded_source(project_dir, batch, manifest)
     if expected_source_sha256 != batch["source_sha256"]:
         raise ValueError("源稿已更新，请刷新页面后再提交AI修改")
@@ -1869,8 +2161,9 @@ def register_batch_artifacts(project_dir: Path, batch_id: str) -> dict[str, Any]
     validate_source_against_confirmed_outline(project_dir, source, batch)
     validate_batch_image_alignment(project_dir, source, batch)
     _require_source_page_floor(source, batch, load_page_calibration(project_dir)["ratio"])
-    batch["status"] = "ready_for_review"
-    manifest["status"] = "awaiting_batch_review"
+    batch["status"] = "ai_rechecking"
+    manifest["status"] = "ai_rechecking"
+    _start_ai_recheck(project_dir, manifest, batch)
     return _write_manifest(project_dir, manifest)
 
 
@@ -2135,6 +2428,7 @@ def request_revision(project_dir: Path, batch_id: str, reason: str) -> tuple[dic
     if manifest["status"] != "awaiting_batch_review" or batch["status"] != "ready_for_review":
         raise ValueError("只有待审校的Word批次可以请求修改")
     _require_recorded_artifacts(project_dir, batch)
+    _require_ai_recheck_passed(project_dir, manifest, batch)
     clean_reason = _require_nonempty_string(reason, "修改说明")
     batch["status"] = "revision_pending"
     manifest["status"] = "revision_pending"
@@ -2161,9 +2455,12 @@ def begin_revision(project_dir: Path, batch_id: str) -> dict[str, Any]:
 def confirm_batch(project_dir: Path, batch_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     manifest = load_manifest(project_dir)
     batch = _batch_by_id(manifest, batch_id)
+    if batch["status"] == "ai_rechecking":
+        _require_ai_recheck_passed(project_dir, manifest, batch)
     if manifest["status"] != "awaiting_batch_review" or batch["status"] != "ready_for_review":
         raise ValueError("只有待审校的Word批次可以确认")
     _require_recorded_artifacts(project_dir, batch)
+    _require_ai_recheck_passed(project_dir, manifest, batch)
     published = publish_confirmed_file(project_dir, manifest, _safe_delivery_file(project_dir, batch["export_path"]), batch["output_filename"])
     batch["status"] = "confirmed"
     receipt = {

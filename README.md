@@ -13,6 +13,9 @@
 - 固定交付 1 个图片规划 Excel，为每张图片提供与已确认规划一致的“AI生图提示词”。
 - 最终交付汇总后，只有用户明确回复“继续”才进入首张示例图确认和剩余图片分批生成流程。
 - 使用本地 JSON、哈希和事件协议记录确认、回修、导出和交付状态，便于恢复中断流程。
+- 每批 Word 导出后必须经过当前 AI 的规则、事实、重复、跨批一致性和导出结果复校；复校通过后才开放人工审阅和确认。
+- Stage4提供默认规则、3个领域预设和自定义规则选择；自定义规则通过规则制作对话确认后写入本机Skill，并可设为后续默认。
+- 使用独立的持久化项目工作区索引区分不同项目；同一项目可恢复原工作区，新一轮会归档旧状态后复用外层目录。
 
 ## 工作流
 
@@ -26,6 +29,22 @@
 | --- | --- | --- |
 | 背景资料 | 项目需求、招标文件、评分表、澄清文件和正式资料 | 是项目事实底座，约束数字、时限、评分响应和承诺边界 |
 | 参考资料 | 历史项目、成熟策略、公司经验和类似标书 | 只提供可选方法与表达；采用前必须核对适用性，不得带入旧客户、人员、业绩、证书、数字或承诺 |
+
+## 项目工作区
+
+项目工作区与 Skill 安装目录、最终交付物保存目录分离。首次进入项目流程前，运行：
+
+```bash
+python3 scripts/project_workspace.py resolve \
+  --project-name "项目名称" \
+  --client "招标人或客户"
+```
+
+可按需要追加 `--tender-reference "招标编号"` 和一个或多个 `--background-path "/绝对路径/需求书.docx"`。脚本返回稳定的 `project_id` 和 `project_dir`。同一项目再次解析时复用原目录；不同项目创建新目录。需要明确开启同名新项目时使用 `--new`，需要接管旧版本目录时使用 `--project-dir`。工作区根目录默认是 `~/Documents/biaoshu-master-projects`，可用 `BIAOSHU_PROJECTS_ROOT` 或 `--root` 改变。
+
+在同一工作区内，`prepare_intake.py --resume` 表示继续原运行；不带 `--resume` 表示重新开始一轮，旧确认状态和旧交付区会归档保留，避免新旧项目状态混用。
+
+规则配置由 `scripts/rule_profiles.py` 管理：`list` 查看规则，`set-default <id>` 设置后续默认规则，`register` 登记用户确认的 Markdown 覆盖层。Stage4页面中的“新建专属规则”会给出标准对话引导语；规则制作模式不会启动标书生产。
 
 ## 界面示例
 
@@ -82,5 +101,7 @@ biaoshu-master/
 ├── scripts/
 └── assets/screenshots/
 ```
+
+项目工作区由 `project_workspace.py` 管理：工作区根目录维护 `project-index.json`，每个项目目录包含 `.biaoshu-project.json` 以及确认台和交付台生成的本地状态；项目资料不会被脚本复制到 Skill 包或上传到 GitHub。
 
 项目地址：[github.com/weiweidounai0131/biaoshu-master](https://github.com/weiweidounai0131/biaoshu-master)

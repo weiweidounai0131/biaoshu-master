@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "biaoshu_rule_index",
+  "default_profile_id": "default",
+  "profiles": [
+    {
+      "id": "default",
+      "name": "默认·通用政企标书",
+      "kind": "default",
+      "description": "当前 Skill 的通用政企标书生成规则，所有领域规则都以此为基础。",
+      "path": "references/stage4-writing-rules.md",
+      "base_id": "default",
+      "read_only": true
+    },
+    {
+      "id": "telecom-information-operations",
+      "name": "电信信息化运维",
+      "kind": "preset",
+      "description": "强化网络、平台和信息化运维项目的服务等级、事件闭环、变更、监控和验收表达。",
+      "path": "rules/presets/telecom-information-operations.md",
+      "base_id": "default",
+      "read_only": true
+    },
+    {
+      "id": "government-consulting-service",
+      "name": "政府咨询与运营服务",
+      "kind": "preset",
+      "description": "强化政府咨询、运营支撑和研究服务项目的政策衔接、调研、协同、成果和保密边界。",
+      "path": "rules/presets/government-consulting-service.md",
+      "base_id": "default",
+      "read_only": true
+    },
+    {
+      "id": "system-integration-delivery",
+      "name": "信息化建设与系统集成",
+      "kind": "preset",
+      "description": "强化系统集成项目的架构、接口、数据迁移、测试上线、验收和运维交接表达。",
+      "path": "rules/presets/system-integration-delivery.md",
+      "base_id": "default",
+      "read_only": true
+    }
+  ]
+}

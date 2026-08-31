@@ -206,6 +206,13 @@ class DeliveryHandler(SimpleHTTPRequestHandler):
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
             return
+        ai_recheck_match = re.fullmatch(r"/api/batches/([^/]+)/ai-recheck", self.path)
+        if ai_recheck_match:
+            try:
+                self.send_json({"ok": True, "ai_recheck": protocol.ai_recheck_payload(self.server.project_dir, ai_recheck_match.group(1))})
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return
         if self.path == "/api/image-plan":
             try:
                 self.send_json({"ok": True, "image_plan": protocol.image_plan_payload(self.server.project_dir)})

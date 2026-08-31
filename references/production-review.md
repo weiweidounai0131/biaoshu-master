@@ -4,6 +4,10 @@
 
 阶段4“最终交付确认”只负责锁定项目口径、标书框架、图片规划、Word批次数和交付边界。用户授权后，由独立的生产与审校台承接正文生成、网页审阅、修改回执、重新导出和最终交付。
 
+生产台接收的`<project_dir>`由`project_workspace.py`在入口阶段解析并贯穿全流程；生产台不得自行创建另一个项目目录，也不得把不同项目的`bid_delivery/`混用。新一轮入口开始前，旧交付工作区必须先归档，恢复中断流程则必须继续使用原项目目录和`project_id`。
+
+Stage4授权中的`generation_rule`是本次正文生产的规则选择：默认规则为`references/stage4-writing-rules.md`，预设和自定义规则是以默认规则为基础的领域覆盖层。规则目录由`scripts/rule_profiles.py`管理；默认规则不可覆盖，规则文件摘要变化会使旧选择失效。项目初始化时会把默认规则与选中的覆盖层合并为唯一的`bid_delivery/stage4-writing-rules.md`快照，因此后续正文生成和AI复校读取的是本项目实际授权的规则。
+
 该设计参考`ppt-master`的Confirm UI与Live Preview分离模式，但适配长篇Word标书：
 
 - 前置确认台只写确认回执，不生成正文；
@@ -65,6 +69,7 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
     batch-02.json
     image-plan.json
   stage4-writing-rules.md
+  # 内容为默认规则与本次选择的领域覆盖层合并快照
   requests/
     request-0001.json
   results/
@@ -81,12 +86,14 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
   lock.json
 ```
 
-- `manifest.json`记录项目、阶段4回执哈希、批次数、每批章节、生成状态、审校状态、导出状态和交付路径。
+- `manifest.json`记录项目、阶段4回执哈希、批次数、每批章节、生成状态、AI复校状态、人工审校状态、导出状态和交付路径。
 - `stage4-writing-rules.md`是阶段4授权后从技能参考文件固化到项目内的标书生成规则快照；`manifest.json.writing_rules`记录其摘要。当前AI必须在每个批次开始前读取该快照，不能以聊天记忆或旧规则替代。
+- `manifest.json.generation_rule`记录本次授权选择的规则ID、名称、来源文件和摘要；规则选择不会改变阶段1至3的项目事实和确认回执。
 - `source/batch-NN.json`保存该批正文的标题树和有序内容块；内容块至少区分正文、列表、表格、图片占位、材料待补位和分页控制。
 - 阶段2确认的一至三级目录是锁定骨架；阶段4只能在已有三级标题下增加四级及以下真实子主题，不能在正文阶段静默改写一至三级目录。
 - `source/image-plan.json`由阶段3回执确定，作为Excel导出的结构化来源。
-- `exports/`只放派生交付物；源稿变化后对应导出立即标记为过期，重新导出成功后才恢复可交付状态。
+- `exports/`只放派生交付物；源稿变化后对应导出立即标记为过期，重新导出成功后先进入AI复校，复校通过后才恢复可人工审校状态。
+- `results/ai-recheck-batch-NN.json`是当前AI对该批Word进行规则、事实、结构、重复和跨批一致性复核的回执；旧回执会归档到`history/`，不得沿用到新源稿或新Word。
 - 所有确认与修改回执使用`schema_version`、`project_id`、上游SHA-256、时间和自身确认哈希，拒绝旧页面或旧稿覆盖新版本。
 - 写入采用临时文件后原子替换，避免AI或浏览器在半写入状态读取损坏JSON。
 
@@ -98,13 +105,13 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
 - 每个四级及以下标题必须有至少两个正文、列表或表格内容块支撑；低密度章节优先扩展已有段落，不得用单句标题制造页数。
 - 内容块按`order`连续编号并关联本批某一章节；表格必须有表头及等列行；图片占位只表达图号、名称和放置说明，不代表已经生图或插图。
 - 本地页面只通过`GET /api/overview`读取交付元数据，并通过`GET /api/batches/<batch_id>/reader?offset=<n>&limit=<n>`按内容块分页读取正文；单次最多80块，不一次加载长篇全文。
-- 页面及接口在本阶段严格只读。没有源稿、源稿哈希不匹配、章节范围不一致或仍未生成的批次，均不得显示正文。
+- 页面及接口在本阶段严格只读。没有源稿、源稿哈希不匹配、章节范围不一致、仍未生成或AI复校未通过的批次，均不得显示正文；只有复校通过后才开放人工审阅和确认。
 
 ### 修改、回修与修订记录
 
 第三阶段在阅读页开放两类受控操作，但浏览器仍不得调用任何模型：
 
-- **直接修改**：只允许替换指定`paragraph`内容块的完整正文。请求必须携带当前源稿SHA-256；系统将修改前/后文本及哈希写入`history/direct-NNNN.json`，使该批次状态变为`export_pending`，清空旧Word摘要和旧确认摘要。此时页面可继续阅读新源稿，但不得确认或继续叠加修改，必须先由当前AI重新导出并登记Word。
+- **直接修改**：只允许替换指定`paragraph`内容块的完整正文。请求必须携带当前源稿SHA-256；系统将修改前/后文本及哈希写入`history/direct-NNNN.json`，使该批次状态变为`export_pending`，清空旧Word摘要和旧确认摘要。此时页面不再显示新源稿，必须先由当前AI重新导出、登记Word并完成AI复校。
 - **AI修改请求**：网页将自然语言指令和目标段落写为`requests/request-NNNN.json`，其中固定项目、批次、目标块和当时源稿SHA-256。请求状态依次为`pending → applying → applied`，若源稿先变化则转为`superseded`，不得覆盖新版本。请求提交后本地事件为`revision`，当前AI可使用等待命令或在用户返回聊天后读取并处理。
 - **AI处理结果**：当前AI先将请求置为`applying`，再写入`results/request-NNNN-result.json`，应用结果后保留`history/ai-request-NNNN.json`修订记录，并同样标记Word待重新导出。当前协议仅允许AI结果替换指定正文段落；复杂结构调整将在后续迭代扩展。
 
@@ -120,13 +127,50 @@ AI等待有效`stage4-confirmation.json`。回执出现后重新验证阶段1至
 
 AI创建`bid_delivery/manifest.json`，状态为`preparing`，登记恰好N个Word和1个Excel。不得预先把尚未生成的文件标为完成。
 
-### 3. 逐批生成
+### 3. 逐批生成与AI复校
 
-AI按阶段4批次顺序生成结构化权威稿、执行内容校验、导出当前批Word，然后把该批状态更新为`ready_for_review`。正文先完整读取项目内`stage4-writing-rules.md`，按阶段2确认的一至三级目录建立骨架，再按“扩展已有段落→挂靠四级→挂靠更深层→补充表格/列表”的深度优先顺序补足内容。页数预算必须实际约束正文：按本批涵盖章节的确认页数、评分权重和内容颗粒度安排足量的实质段落、列表、表格和占位，不得用重复或空泛文字凑页。导出登记前，协议会以结构化源稿估算页数；预计少于计划页数90%的批次被拒绝登记，AI只能补强内容密度不足的章节并重新导出。每完成一批就进入用户审校闸门；用户未确认当前批时，不自动越过闸门批量完成余下批次，除非用户在阶段4或聊天中明确授权连续生成。
+AI按阶段4批次顺序生成结构化权威稿、执行本地结构与页数校验、导出当前批Word。导出登记后协议会把批次置为`ai_rechecking`，并创建`results/ai-recheck-batch-NN.json`的运行中占位；此时页面不显示正文，也没有确认入口。
+
+当前AI必须完整读取项目内`stage4-writing-rules.md`，再读取本批结构化源稿、Word导出和本地导出校验结果，逐块复核：规则硬约束、项目事实与承诺边界、阶段2一至三级骨架和评分覆盖、完全/近似重复段落、跨批术语与成果衔接、Word格式和页数预算。复校还要结合已确认批次检查分批切割造成的重复、断裂或过渡残留。复校报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`，并在`summary`中如实填写覆盖块数和问题数；每个问题必须给出位置、证据和处理建议。
+
+AI完成复校后，将完整报告写入临时JSON，再执行：
+
+```bash
+python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> \
+  --batch word-batch-1 \
+  --report <ai-recheck-report.json>
+```
+
+报告必须是完整JSON对象，至少按以下结构提供全部字段；下面的覆盖数量只是示意，实际必须填写源稿真实数量（不得用0代替）；`findings`为空时表示没有需要记录的问题，存在问题时必须逐条填写完整问题对象：
+
+```json
+{
+  "schema_version": 1,
+  "kind": "bid_delivery_ai_recheck",
+  "status": "passed",
+  "project_id": "<project_id>",
+  "batch_id": "word-batch-1",
+  "batch_order": 1,
+  "stage4_confirmation_sha256": "<sha256>",
+  "source_sha256": "<sha256>",
+  "export_sha256": "<sha256>",
+  "writing_rules_sha256": "<sha256>",
+  "checked_at": "<ISO-8601时间>",
+  "checker": "当前AI",
+  "rules_read": true,
+  "scope": ["writing_rules", "project_facts", "outline_scoring", "duplicate_control", "cross_batch_consistency", "word_export", "page_budget"],
+  "summary": {"checked_blocks": 12, "checked_paragraphs": 8, "checked_sections": 1, "blocking_findings": 0, "warning_findings": 0, "info_findings": 0},
+  "findings": []
+}
+```
+
+问题对象固定包含`id`、`severity`、`category`、`location`、`description`、`evidence`（非空文本数组）和`resolution`；摘要中的三类问题数量必须与问题清单逐项一致。
+
+只有`status: passed`且不存在`blocking`问题时，批次才会转为`ready_for_review`并开放人工审阅；`status: failed`会把批次置为`regenerating`、项目置为`revising`，当前AI必须按问题修复源稿并重新导出、复校。人工不能跳过复校、不能直接确认。正文先完整读取项目内规则，按阶段2确认的一至三级目录建立骨架，再按“扩展已有段落→挂靠四级→挂靠更深层→补充表格/列表”的深度优先顺序补足内容。页数预算必须实际约束正文：按本批涵盖章节的确认页数、评分权重和内容颗粒度安排足量的实质段落、列表、表格和占位，不得用重复或空泛文字凑页。预计少于计划页数90%的批次被拒绝登记，AI只能补强内容密度不足的章节并重新导出。每完成一批并复校通过后才进入用户审校闸门；用户未确认当前批时，不自动越过闸门批量完成余下批次，除非用户在阶段4或聊天中明确授权连续生成。
 
 ### 4. 网页审校
 
-审校台按批次、章节和标题懒加载内容，避免一次渲染700页。用户可以：
+审校台按批次、章节和标题懒加载内容，避免一次渲染700页。只有AI复校通过的批次才会显示正文。用户可以：
 
 - 只读查看正文、表格、列表、图片占位与预计/实际页数；AI预计页数已落在计划页数±10%时，用户无需填写实际页数，只有发现WPS页数偏差时才登记实际页数；
 - 对确定性文字做直接编辑并暂存；
@@ -163,7 +207,7 @@ AI完成修改后写入对应`results/request-NNNN-result.json`，更新结构�
 
 用户确认当前批后写入`confirmations/batch-NN-confirmation.json`。确认回执绑定当前源稿和Word文件摘要。后续修改该批时，原确认自动归档失效并要求重新确认。
 
-页面通过`POST /api/batches/<batch_id>/confirm`写入回执；只有当前批处于`ready_for_review`且源稿、Word和本地校验均匹配时可以确认。确认后才会解锁下一批，页面不会自行调用AI生成下一批。
+页面通过`POST /api/batches/<batch_id>/confirm`写入回执；只有当前批处于`ready_for_review`、AI复校回执为`passed`且源稿、Word和本地校验均匹配时可以确认。确认后才会解锁下一批，页面不会自行调用AI生成下一批。
 
 ### 7. Excel与最终确认
 
@@ -196,9 +240,9 @@ python3 scripts/bid_delivery_ui/export_image_plan.py <project_dir> \
 ```
 
 - Word导出器只读取当前批次的`source/batch-NN.json`，按已确认格式写入仿宋_GB2312、四号、全部文字颜色为黑色、标题加粗、标题无缩进/段前10磅、正文首行缩进2字符、1.25倍行距、`·`列表和无底色黑色单线边框表格；图片与材料只保留规划/待补占位。
-- Word导出后检查DOCX包结构、可重新打开性、章节标题、表格和占位数量，写入`results/word-batch-NN-validation.json`，并记录源稿预计页数和各章内容密度。预计页数在计划页数±10%内时可作为无需人工登记的交付依据；用户登记的WPS实际页数超出范围时必须触发审校版迭代。
+- Word导出后检查DOCX包结构、可重新打开性、章节标题、表格和占位数量，写入`results/word-batch-NN-validation.json`，并记录源稿预计页数和各章内容密度；登记后批次强制进入`ai_rechecking`。当前AI另行写入严格绑定本批源稿、Word、Stage4授权和规则快照的`results/ai-recheck-batch-NN.json`，只有复校通过才进入人工审校。预计页数在计划页数±10%内时可作为无需人工登记的交付依据；用户登记的WPS实际页数超出范围时必须触发审校版迭代，且修改后必须重新复校。
 - 图片Excel导出器先由阶段3确认回执写入`source/image-plan.json`，再以一个工作表“图片规划清单”导出。表内只有图片规划字段和逐图`AI生图提示词`，明确写明“交给其他AI生图”；不创建图片、不记录素材路径、不插入Word。最终交付后的可选生图由`image_generation.py`单独记录，不回写本Excel。
-- 本地审校台可通过`GET /api/batches/<batch_id>/validation`读取当前Word校验结果，通过`GET /api/image-plan`读取当前Excel规划元数据；Excel在最终确认前可通过受控本地修改接口更新图片名称、类型、表达、节点、构图、方向和放置说明，保存后必须重新导出。浏览器不调用模型。
+- 本地审校台可通过`GET /api/batches/<batch_id>/validation`读取当前Word校验结果、通过`GET /api/batches/<batch_id>/ai-recheck`读取当前AI复校回执、通过`GET /api/image-plan`读取当前Excel规划元数据；Excel在最终确认前可通过受控本地修改接口更新图片名称、类型、表达、节点、构图、方向和放置说明，保存后必须重新导出。浏览器不调用模型。
 
 ## 本地服务生命周期
 
@@ -213,7 +257,7 @@ python3 scripts/bid_delivery_ui/server.py <project_dir> --shutdown
 
 - `--init`只在阶段4最终授权有效时创建交付清单；已有清单只校验并恢复，绝不静默覆盖。
 - `--daemon`只启动并健康检查生产服务，然后打印实际URL；正常第4阶段必须配合`--no-browser`使用，**不得另开浏览器标签**。前置确认页会在生产服务就绪后自动以当前标签替换为生产与审校页；只有恢复排障且原页面已关闭时，才由用户手动打开打印出的URL。
-- `--wait-only --wait-event user-action --wait-timeout 0`无限等待AI修改请求、批次确认、图片规划确认或最终确认；人工直接修改由本地服务同步保存并确定性重导出，不消耗AI回合。当前AI收到任一中间事件后，必须在同一对话中应用修改、重新导出或生成下一批，然后立刻重新进入无限等待。宿主若强制后台化等待命令，AI必须立即续等，不得收尾或结束任务；仅`final-confirmed`允许进入交付汇总和结束。
+- `--wait-only --wait-event user-action --wait-timeout 0`无限等待AI修改请求、批次确认、图片规划确认或最终确认；人工直接修改由本地服务同步保存并确定性重导出，但导出后仍必须由当前AI完成复校并重新登记回执。当前AI收到任一中间事件后，必须在同一对话中应用修改、复校、重新导出或生成下一批，然后立刻重新进入无限等待。宿主若强制后台化等待命令，AI必须立即续等，不得收尾或结束任务；仅`final-confirmed`允许进入交付汇总和结束。
 - 同一项目只允许一个生产审校服务；死进程锁可安全恢复。
 - 服务仅监听`127.0.0.1`，所有资料和正文保留在本机。
 - 页面关闭不等于确认；已提交的修改请求和确认回执必须持久化。

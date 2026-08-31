@@ -20,12 +20,12 @@
       <div class="stage complete stage-link" data-stage="stage3"><span>✓</span><div><strong>图片规划</strong><small>已确认 · 只读回看</small></div></div>
       <div class="stage active"><span>04</span><div><strong>生产与审校</strong><small>当前阶段</small></div></div>
     </nav>
-    <div class="sidebar-note"><b>本地审校</b><p>正文、列表和表格均可直接修改；需要判断的改写会保存为 AI 修改请求，不在浏览器调用模型。</p></div>
+    <div class="sidebar-note"><b>AI复校闸门</b><p>每批 Word 导出后，当前 AI 必须先按项目规则复校；只有复校通过，正文才会开放给人工审阅和确认。</p></div>
   </aside>
 
   <main class="workspace">
     <header class="topbar">
-      <div><p class="eyebrow">第四阶段 · 生产与审校</p><h1>查看交付进度与已生成内容</h1><p class="subtitle">按批次浏览结构化正文。页面不调用 AI，也不会修改任何文件。</p></div>
+      <div><p class="eyebrow">第四阶段 · 生产与审校</p><h1>查看交付进度与已生成内容</h1><p class="subtitle">每批 Word 先经过当前 AI 复校，再开放人工审阅。页面不调用 AI。</p></div>
       <div class="metrics"><div><b id="metric-batches">—</b><small>Word批次</small></div><div><b id="metric-pages">—</b><small>计划页数</small></div><div><b id="metric-images">—</b><small>规划图片</small></div></div>
     </header>
 
@@ -36,7 +36,7 @@
 
     <section class="delivery-layout">
       <div class="batch-panel card">
-        <div class="panel-head"><div><h2>Word批次</h2><p>仅已生成批次可以进入正文阅读。</p></div><span id="delivery-status" class="status-badge">读取中</span></div>
+        <div class="panel-head"><div><h2>Word批次</h2><p>只有 AI 复校通过且本地导出校验完成的批次可以进入正文阅读。</p></div><span id="delivery-status" class="status-badge">读取中</span></div>
         <div id="batch-list" class="batch-list" aria-live="polite"></div>
         <button id="view-image-plan" class="batch-card excel-batch-card" type="button"><span class="batch-number excel-icon">X</span><span id="excel-state" class="batch-state">读取中</span><h3>图片规划 Excel</h3><p id="excel-status">读取中</p></button>
         <div class="final-delivery-action"><p id="final-action-note">正在核验全部交付物状态…</p><button id="confirm-final" class="button-primary" type="button" disabled>确认全部交付</button></div>
@@ -44,7 +44,7 @@
 
       <div class="reader-panel card">
         <div class="reader-head"><div><p class="section-label">结构化源稿 · 本地审校</p><h2 id="reader-title">请选择已生成的 Word 批次</h2><p id="reader-meta">未生成的批次不会加载正文。</p><p id="reader-validation" class="validation-info" hidden></p><div id="wps-page-check" class="wps-page-check" hidden><span id="wps-page-note"></span><input id="wps-actual-pages" type="number" min="1" inputmode="numeric" aria-label="WPS实际页数"><button id="save-wps-pages" type="button">登记页数</button></div></div><span id="reader-version" class="version-tag" hidden></span></div>
-        <div id="reader-empty" class="reader-empty"><span>文</span><h3>暂无可阅读正文</h3><p>当前仅展示已完成本地校验的批次。生成并登记源稿后，该批正文会出现在这里。</p></div>
+        <div id="reader-empty" class="reader-empty"><span>文</span><h3>暂无可阅读正文</h3><p>当前仅展示已完成 AI 复校和本地导出校验的批次。生成 Word 后，请等待复校通过。</p></div>
         <article id="reader-content" class="reader-content" hidden></article>
         <div id="reader-footer" class="reader-footer" hidden><span id="reader-progress"></span><div class="reader-actions"><button id="load-more" type="button">展开更多内容</button><button id="confirm-batch" class="button-primary" type="button" hidden>确认并交付本批 Word</button><button id="confirm-image-plan" class="button-primary" type="button" hidden>确认并交付图片规划 Excel</button></div></div>
       </div>
@@ -81,6 +81,6 @@
     </section>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/reader.js?v=11"></script>
+  <script src="/reader.js?v=12"></script>
 </body>
 </html>
