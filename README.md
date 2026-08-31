@@ -70,7 +70,7 @@ python3 scripts/install_dependencies.py
 
 ## 更新检测
 
-本 Skill 使用 `skill-version.json` 保存本地版本，使用 GitHub 的公开 HTTPS 原始文件作为远端版本端点。更新检测不依赖本地 `.git`，因此 Git 安装和 ZIP 安装都能使用同一套逻辑：
+本 Skill 使用 `skill-version.json` 保存本地版本，优先使用 GitHub Contents API、再以带 `refs/heads` 的公开 HTTPS 原始文件作为远端版本端点。更新检测不依赖本地 `.git`，因此 Git 安装和 ZIP 安装都能使用同一套逻辑，也不会因普通 `raw/.../main` 地址的短时缓存误判版本：
 
 ```bash
 python3 scripts/check_skill_update.py

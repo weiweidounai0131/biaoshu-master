@@ -3,7 +3,8 @@
   "name": "biaoshu-master",
   "version_file": "skill-version.json",
   "version_urls": [
-    "https://raw.githubusercontent.com/weiweidounai0131/biaoshu-master/main/skill-version.json"
+    "https://api.github.com/repos/weiweidounai0131/biaoshu-master/contents/skill-version.json?ref=main",
+    "https://github.com/weiweidounai0131/biaoshu-master/raw/refs/heads/main/skill-version.json"
   ],
   "download_url": "https://github.com/weiweidounai0131/biaoshu-master/archive/refs/heads/main.zip",
   "repository": "https://github.com/weiweidounai0131/biaoshu-master",

@@ -11,6 +11,7 @@ only for an explicit user-approved update.
 from __future__ import annotations
 
 import argparse
+import base64
 import io
 import json
 import os
@@ -82,11 +83,30 @@ def _github_raw_url(repository: str, branch: str, relative_path: str) -> Optiona
     owner, repo = match.groups()
     encoded_branch = urllib_parse.quote(branch, safe="")
     encoded_path = urllib_parse.quote(relative_path, safe="/")
-    return "https://raw.githubusercontent.com/{}/{}/{}/{}".format(
+    return "https://github.com/{}/{}/raw/refs/heads/{}/{}".format(
         owner,
         repo,
         encoded_branch,
         encoded_path,
+    )
+
+
+def _github_contents_api_url(repository: str, branch: str, relative_path: str) -> Optional[str]:
+    match = re.match(
+        r"^https?://github\.com/([^/]+)/([^/#]+?)(?:\.git)?/?$",
+        repository,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    owner, repo = match.groups()
+    encoded_branch = urllib_parse.quote(branch, safe="")
+    encoded_path = urllib_parse.quote(relative_path, safe="/")
+    return "https://api.github.com/repos/{}/{}/contents/{}?ref={}".format(
+        owner,
+        repo,
+        encoded_path,
+        encoded_branch,
     )
 
 
@@ -127,8 +147,11 @@ def _load_update_config(skill_dir: Path) -> dict[str, Any]:
             if url.startswith("https://") and url not in urls:
                 urls.append(url)
     if not urls:
+        api_url = _github_contents_api_url(repository, branch, version_file)
+        if api_url:
+            urls.append(api_url)
         derived = _github_raw_url(repository, branch, version_file)
-        if derived:
+        if derived and derived not in urls:
             urls.append(derived)
 
     download_url = str(data.get("download_url") or "").strip()
@@ -198,6 +221,13 @@ def _fetch_json(url: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
         if len(payload) > MAX_MANIFEST_BYTES:
             return None, "manifest_too_large"
         data = json.loads(payload.decode("utf-8"))
+        if isinstance(data, dict) and data.get("encoding") == "base64" and isinstance(data.get("content"), str):
+            encoded_content = "".join(data["content"].split())
+            try:
+                decoded_content = base64.b64decode(encoded_content, validate=True).decode("utf-8")
+                data = json.loads(decoded_content)
+            except (ValueError, UnicodeError, json.JSONDecodeError):
+                return None, "manifest_decode_failed"
         if not isinstance(data, dict):
             return None, "manifest_not_object"
         return data, None
