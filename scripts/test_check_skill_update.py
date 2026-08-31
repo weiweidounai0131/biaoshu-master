@@ -31,6 +31,33 @@ class SkillUpdateCheckTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertEqual(data, manifest)
 
+    def test_gitcode_contents_url_is_derived(self) -> None:
+        url = updater._gitcode_contents_api_url(
+            "https://gitcode.com/gcw_mHRylKw0/biaoshu-master.git",
+            "main",
+            "skill-version.json",
+        )
+        self.assertEqual(
+            url,
+            "https://api.gitcode.com/api/v5/repos/gcw_mHRylKw0/biaoshu-master/contents/skill-version.json?ref=main",
+        )
+
+    def test_remote_version_falls_back_to_gitcode(self) -> None:
+        github_url = "https://api.github.com/repos/example/repo/contents/skill-version.json?ref=main"
+        gitcode_url = "https://api.gitcode.com/api/v5/repos/example/repo/contents/skill-version.json?ref=main"
+
+        def fake_fetch(url: str):
+            if "github.com" in url:
+                return None, "network_unreachable"
+            return {"version": "0.1.8"}, None
+
+        with patch.object(updater, "_fetch_json", side_effect=fake_fetch):
+            version, url, errors = updater._fetch_remote_version([github_url, gitcode_url])
+
+        self.assertEqual(version, "0.1.8")
+        self.assertEqual(url, gitcode_url)
+        self.assertEqual(errors, [{"url": github_url, "reason": "network_unreachable"}])
+
 
 if __name__ == "__main__":
     unittest.main()

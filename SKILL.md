@@ -11,12 +11,16 @@ description: 面向政府部门、事业单位、国企、央企及其他政企�
 
 ## 显式调用后的 GitHub 更新检查
 
-用户显式调用本技能后，第一步必须运行`python3 scripts/check_skill_update.py`检查版本。检查脚本以技能包内的`skill-version.json`为本地版本，以`skill-update.json`配置的公开HTTPS版本端点为远端版本，优先读取GitHub Contents API并以后备的`refs/heads`原始文件端点重试，不依赖本地`.git`，因此Git仓库安装和ZIP安装使用同一套逻辑。该检查只读取远端状态，不自动修改本地文件，也不会上传项目资料。若结果为`update_available`，先停止后续流程并询问用户：“GitHub上的biaoshu-master有新版本，是否先更新？回复‘是’更新，回复‘否’继续当前任务。”
+用户显式调用本技能后，第一步必须运行`python3 scripts/check_skill_update.py`检查版本。检查脚本以技能包内的`skill-version.json`为本地版本，以`skill-update.json`配置的公开HTTPS版本端点为远端版本，按“GitHub Contents API → GitHub refs/heads原始文件 → GitCode Contents API”的顺序检查；GitHub端点均不可访问或返回无效版本时，自动切换到GitCode，不依赖本地`.git`，因此Git仓库安装和ZIP安装使用同一套逻辑。结果中的`version_provider`和`fallback_used`表示实际采用的平台。该检查只读取远端状态，不自动修改本地文件，也不会上传项目资料。若结果为`update_available`，先停止后续流程并询问用户：“GitHub上的biaoshu-master有新版本，是否先更新？回复‘是’更新，回复‘否’继续当前任务。”
 
 - 用户明确回复“是”后，只有工作区干净时才执行脚本的`--update`；Git安装执行快进更新，ZIP安装从公开下载地址安全下载、校验并替换技能包。更新完成后提示用户重新显式调用`$biaoshu-master`并重新提交需求；更新前后的技能文件、项目资料和确认回执不得混用。
 - 用户明确回复“否”后，记录本次选择并继续当前需求；不能再次强制询问同一版本。
 - 用户没有回复、回复不是明确的“是/否”，或远端不可访问、当前技能包未配置公开端点时，不执行更新；前者保持等待，后两者说明检查结果后继续当前任务。
 - 禁止把项目目录、背景资料、参考资料、确认回执、生成的Word/Excel或本机运行数据推送到GitHub。GitHub只用于发布技能源代码、说明文档和不含隐私的示例。
+
+## GitHub/GitCode 双平台发布
+
+本 Skill 的 canonical 仓库同时维护两个公开源：GitHub `origin`（`https://github.com/weiweidounai0131/biaoshu-master`）和 GitCode `gitcode`（`https://gitcode.com/gcw_mHRylKw0/biaoshu-master`）。用户明确要求推送、发布或同步本 Skill 时，先完成必要测试和版本递增，再把同一个提交推送到当前分支的两个远端；任一端失败都不得宣称双端完成，必须报告实际失败端。推送后核对两个远端分支指向同一提交。两个平台只允许同步 Skill 源码、规则、文档和脱敏示例，不得同步项目资料、确认回执、生成的Word/Excel、本机运行数据、绝对路径、Token或其他凭据。
 
 ## 首次调用回复词
 

@@ -30,6 +30,7 @@ from urllib import request as urllib_request
 
 DEFAULT_REPOSITORY = "https://github.com/weiweidounai0131/biaoshu-master.git"
 DEFAULT_BRANCH = "main"
+DEFAULT_GITCODE_REPOSITORY = "https://gitcode.com/gcw_mHRylKw0/biaoshu-master.git"
 DEFAULT_VERSION_FILE = "skill-version.json"
 UPDATE_CONFIG_NAME = "skill-update.json"
 MAX_MANIFEST_BYTES = 1024 * 1024
@@ -123,6 +124,47 @@ def _github_archive_url(repository: str, branch: str) -> Optional[str]:
     return "https://github.com/{}/{}/archive/refs/heads/{}.zip".format(owner, repo, encoded_branch)
 
 
+def _gitcode_contents_api_url(repository: str, branch: str, relative_path: str) -> Optional[str]:
+    match = re.match(
+        r"^https?://gitcode\.com/([^/]+)/([^/#]+?)(?:\.git)?/?$",
+        repository,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    owner, repo = match.groups()
+    encoded_branch = urllib_parse.quote(branch, safe="")
+    encoded_path = urllib_parse.quote(relative_path, safe="/")
+    return "https://api.gitcode.com/api/v5/repos/{}/{}/contents/{}?ref={}".format(
+        owner,
+        repo,
+        encoded_path,
+        encoded_branch,
+    )
+
+
+def _gitcode_archive_url(repository: str, branch: str) -> Optional[str]:
+    match = re.match(
+        r"^https?://gitcode\.com/([^/]+)/([^/#]+?)(?:\.git)?/?$",
+        repository,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    owner, repo = match.groups()
+    encoded_branch = urllib_parse.quote(branch, safe="")
+    return "https://raw.gitcode.com/{}/{}/archive/refs/heads/{}.zip".format(owner, repo, encoded_branch)
+
+
+def _provider_for_url(url: str) -> str:
+    host = (urllib_parse.urlparse(url).hostname or "").lower()
+    if host == "api.github.com" or host.endswith("github.com"):
+        return "github"
+    if host == "api.gitcode.com" or host.endswith("gitcode.com"):
+        return "gitcode"
+    return host or "unknown"
+
+
 def _load_update_config(skill_dir: Path) -> dict[str, Any]:
     """Read public update metadata and retain safe defaults for old packages."""
     data: dict[str, Any] = {}
@@ -137,6 +179,8 @@ def _load_update_config(skill_dir: Path) -> dict[str, Any]:
 
     repository = str(data.get("repository") or data.get("remote_url") or DEFAULT_REPOSITORY).strip()
     branch = str(data.get("branch") or DEFAULT_BRANCH).strip() or DEFAULT_BRANCH
+    gitcode_repository = str(data.get("gitcode_repository") or DEFAULT_GITCODE_REPOSITORY).strip()
+    gitcode_branch = str(data.get("gitcode_branch") or branch).strip() or branch
     version_file = _safe_relative_path(data.get("version_file"), DEFAULT_VERSION_FILE)
 
     urls: list[str] = []
@@ -153,19 +197,39 @@ def _load_update_config(skill_dir: Path) -> dict[str, Any]:
         derived = _github_raw_url(repository, branch, version_file)
         if derived and derived not in urls:
             urls.append(derived)
+    gitcode_version_url = _gitcode_contents_api_url(gitcode_repository, gitcode_branch, version_file)
+    if gitcode_version_url and gitcode_version_url not in urls:
+        urls.append(gitcode_version_url)
 
-    download_url = str(data.get("download_url") or "").strip()
-    if not download_url:
-        download_url = _github_archive_url(repository, branch) or ""
+    download_urls: list[str] = []
+    configured_download_urls = data.get("download_urls")
+    if isinstance(configured_download_urls, list):
+        for value in configured_download_urls:
+            url = str(value or "").strip()
+            if url.startswith("https://") and url not in download_urls:
+                download_urls.append(url)
+    legacy_download_url = str(data.get("download_url") or "").strip()
+    if legacy_download_url.startswith("https://") and legacy_download_url not in download_urls:
+        download_urls.insert(0, legacy_download_url)
+    if not download_urls:
+        derived_download_url = _github_archive_url(repository, branch)
+        if derived_download_url:
+            download_urls.append(derived_download_url)
+    gitcode_download_url = _gitcode_archive_url(gitcode_repository, gitcode_branch)
+    if gitcode_download_url and gitcode_download_url not in download_urls:
+        download_urls.append(gitcode_download_url)
 
     return {
         "schema_version": data.get("schema_version", 1),
         "name": str(data.get("name") or "biaoshu-master").strip(),
         "repository": repository or DEFAULT_REPOSITORY,
         "branch": branch,
+        "gitcode_repository": gitcode_repository,
+        "gitcode_branch": gitcode_branch,
         "version_file": version_file,
         "version_urls": urls,
-        "download_url": download_url,
+        "download_urls": download_urls,
+        "download_url": download_urls[0] if download_urls else "",
     }
 
 
@@ -269,6 +333,8 @@ def check(skill_dir: Path) -> dict[str, Any]:
             "install_type": _install_type(skill_dir),
             "repository": config["repository"],
             "branch": config["branch"],
+            "gitcode_repository": config["gitcode_repository"],
+            "gitcode_branch": config["gitcode_branch"],
             "version_file": config["version_file"],
             "version_urls": config["version_urls"],
         }
@@ -312,8 +378,12 @@ def check(skill_dir: Path) -> dict[str, Any]:
             "version_relation": relation,
             "remote_version": remote_version,
             "version_url": version_url,
+            "version_provider": _provider_for_url(version_url),
         }
     )
+    result["fallback_used"] = result["version_provider"] != "github"
+    if result["fallback_used"] and fetch_errors:
+        result["fallback_attempts"] = fetch_errors
     return result
 
 
@@ -416,13 +486,32 @@ def _replace_package(skill_dir: Path, remote_dir: Path) -> None:
 
 
 def _update_package(skill_dir: Path, config: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-    download_url = str(config.get("download_url") or "").strip()
-    if not download_url:
+    download_urls = [str(value).strip() for value in config.get("download_urls", []) if str(value).strip()]
+    if not download_urls:
+        legacy_download_url = str(config.get("download_url") or "").strip()
+        if legacy_download_url:
+            download_urls = [legacy_download_url]
+    if not download_urls:
         result.update({"status": "update_failed", "reason": "download_url_missing"})
         return result
-    result["download_url"] = download_url
 
-    archive_bytes = _download_bytes(download_url)
+    archive_bytes: bytes | None = None
+    download_url: str | None = None
+    download_attempts: list[dict[str, str]] = []
+    for candidate in download_urls:
+        try:
+            archive_bytes = _download_bytes(candidate)
+            download_url = candidate
+            break
+        except (OSError, ValueError, TimeoutError, urllib_error.URLError) as exc:
+            download_attempts.append({"url": candidate, "provider": _provider_for_url(candidate), "reason": str(exc) or "download_failed"})
+    if archive_bytes is None or download_url is None:
+        result.update({"status": "update_failed", "reason": "all_download_sources_unavailable", "download_attempts": download_attempts})
+        return result
+    result["download_url"] = download_url
+    result["update_provider"] = _provider_for_url(download_url)
+    if download_attempts:
+        result["download_attempts"] = download_attempts
     with tempfile.TemporaryDirectory(prefix="biaoshu-master-update-", dir=str(skill_dir.parent)) as holder:
         extracted = Path(holder) / "extracted"
         extracted.mkdir()
@@ -453,6 +542,7 @@ def _update_package(skill_dir: Path, config: dict[str, Any], result: dict[str, A
 def update(skill_dir: Path) -> dict[str, Any]:
     skill_dir = skill_dir.expanduser().resolve()
     result = check(skill_dir)
+    config = _load_update_config(skill_dir)
     result["update_requested"] = True
     if result.get("status") != "update_available":
         return result
@@ -466,21 +556,32 @@ def update(skill_dir: Path) -> dict[str, Any]:
             result.update({"status": "update_blocked_dirty", "reason": "working_tree_dirty"})
             return result
         branch = str(result["branch"])
-        pulled = _run(skill_dir, "pull", "--ff-only", "origin", branch)
-        if pulled.returncode != 0:
-            result.update({"status": "update_failed", "reason": _error_kind(pulled)})
-            return result
-        after_version, _source, _error = _local_version(skill_dir, _load_update_config(skill_dir))
-        result.update(
-            {
-                "status": "updated",
-                "before_version": result.get("local_version"),
-                "after_version": after_version or None,
-            }
-        )
+        gitcode_branch = str(config.get("gitcode_branch") or branch)
+        pull_sources: list[tuple[str, str, str]] = [("github", "origin", branch)]
+        gitcode_remote = _run(skill_dir, "remote", "get-url", "gitcode")
+        gitcode_source = _output(gitcode_remote) if gitcode_remote.returncode == 0 else str(config.get("gitcode_repository") or "").strip()
+        if gitcode_source:
+            pull_sources.append(("gitcode", gitcode_source, gitcode_branch))
+        pull_attempts: list[dict[str, str]] = []
+        for provider, source, source_branch in pull_sources:
+            pulled = _run(skill_dir, "pull", "--ff-only", source, source_branch)
+            if pulled.returncode == 0:
+                after_version, _source, _error = _local_version(skill_dir, _load_update_config(skill_dir))
+                result.update(
+                    {
+                        "status": "updated",
+                        "before_version": result.get("local_version"),
+                        "after_version": after_version or None,
+                        "update_provider": provider,
+                    }
+                )
+                if pull_attempts:
+                    result["update_attempts"] = pull_attempts
+                return result
+            pull_attempts.append({"provider": provider, "source": source if provider == "gitcode" else provider, "reason": _error_kind(pulled)})
+        result.update({"status": "update_failed", "reason": "all_git_sources_unavailable", "update_attempts": pull_attempts})
         return result
 
-    config = _load_update_config(skill_dir)
     try:
         return _update_package(skill_dir, config, result)
     except (OSError, ValueError, urllib_error.URLError, zipfile.BadZipFile, shutil.Error) as exc:

@@ -70,7 +70,7 @@ python3 scripts/install_dependencies.py
 
 ## 更新检测
 
-本 Skill 使用 `skill-version.json` 保存本地版本，优先使用 GitHub Contents API、再以带 `refs/heads` 的公开 HTTPS 原始文件作为远端版本端点。更新检测不依赖本地 `.git`，因此 Git 安装和 ZIP 安装都能使用同一套逻辑，也不会因普通 `raw/.../main` 地址的短时缓存误判版本：
+本 Skill 使用 `skill-version.json` 保存本地版本，按 GitHub Contents API、GitHub `refs/heads` 原始文件、GitCode Contents API 的顺序检查远端版本；GitHub 不通时自动切换 GitCode。更新检测不依赖本地 `.git`，因此 Git 安装和 ZIP 安装都能使用同一套逻辑，也不会因普通 `raw/.../main` 地址的短时缓存误判版本：
 
 ```bash
 python3 scripts/check_skill_update.py
@@ -83,6 +83,8 @@ python3 scripts/check_skill_update.py --update
 ```
 
 更新成功后重新显式调用本 Skill，避免新旧协议和项目回执混用。更新脚本只访问公开版本清单和技能包，不上传项目资料。
+
+本 Skill 的 canonical 源码同时推送到 [GitHub](https://github.com/weiweidounai0131/biaoshu-master) 和 [GitCode](https://gitcode.com/gcw_mHRylKw0/biaoshu-master)。用户要求发布更新时，两个平台必须使用同一个提交并分别核对远端分支；项目资料和本机运行数据不进入任一公开仓库。
 
 ## 隐私与公开边界
 
