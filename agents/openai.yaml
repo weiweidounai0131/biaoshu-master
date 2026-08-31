@@ -1,6 +1,6 @@
 interface:
   display_name: "Biaoshu Master"
-  short_description: "面向政企项目的主标或陪标标书分阶段编写与终审工作流"
-  default_prompt: "Use $biaoshu-master to complete this government-enterprise bid proposal through the confirmation UI, check the GitHub skill version first, keep background materials authoritative and reference materials optional, read the Stage-4 writing rules before producing Word, lock the confirmed Stage-2 level 1-3 outline during Stage-4 production, use depth-first content expansion, include a per-image AI generation prompt in the planning workbook, keep G0-G7 image-free, and only offer the optional local image-generation flow after final delivery when the user explicitly replies ‘继续’. Briefly explain the staged workflow and deliverables on first use, then wait for each required confirmation."
+  short_description: "跨行业标书与方案竞标的分阶段AI编写、审校与交付工作流"
+  default_prompt: "Use $biaoshu-master to turn my tender materials into a traceable, reviewable, delivery-ready proposal for any industry; check the skill version first, keep background facts authoritative and references optional, follow the confirmed outline and Stage-4 writing rules, run AI recheck before human review, keep project data local, and wait for each required confirmation."
 policy:
   allow_implicit_invocation: false

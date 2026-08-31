@@ -147,6 +147,8 @@ class NavigationStaticTest(unittest.TestCase):
         path = Path(__file__).resolve().parent / "static" / "workflow-nav.js"
         source = path.read_text(encoding="utf-8")
         self.assertIn('page === "stage4" && delivery.delivery_ready && delivery.delivery_url', source)
+        self.assertIn('completed.has(stage.id) && !isViewed && !isWorkflowCurrent', source)
+        self.assertIn('session.delivery_active && !isViewed) status.textContent = "当前阶段"', source)
 
 
 if __name__=="__main__":unittest.main()

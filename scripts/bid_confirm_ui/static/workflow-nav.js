@@ -28,7 +28,9 @@
       if (!stage) return;
       const isViewed = viewedStage === stage.id;
       const isWorkflowCurrent = session.stage === stage.id;
-      const isDone = completed.has(stage.id) && !isViewed;
+      // Stage 4 remains the workflow's current production stage even when a
+      // user is temporarily viewing an earlier confirmed stage.
+      const isDone = completed.has(stage.id) && !isViewed && !isWorkflowCurrent;
       const available = isWorkflowCurrent || completed.has(stage.id) || isViewed;
       button.classList.toggle("active", isViewed);
       button.classList.toggle("done", isDone);
@@ -44,7 +46,7 @@
       if (marker) marker.textContent = isDone ? "✓" : stage.number;
       const status = button.querySelector("small");
       if (status) {
-        if (stage.id === "stage4" && session.delivery_active && !isViewed) status.textContent = "生产与审校 · 可回看";
+        if (stage.id === "stage4" && session.delivery_active && !isViewed) status.textContent = "当前阶段";
         else if (isViewed && completed.has(stage.id)) status.textContent = "已确认 · 当前查看";
         else if (isViewed && isWorkflowCurrent) status.textContent = session.mode === "confirmed" ? "已确认 · 当前查看" : "当前阶段";
         else if (isDone) status.textContent = "已确认 · 只读回看";
