@@ -810,7 +810,7 @@ def validate_stage1(source: dict[str, Any]) -> None:
 
 
 def validate_stage2(source: dict[str, Any], stage1_receipt: dict[str, Any]) -> None:
-    required = {"schema_version", "stage", "project_id", "stage1_confirmation_sha256", "target_pages", "coverage", "chapters"}
+    required = {"schema_version", "stage", "project_id", "stage1_confirmation_sha256", "target_pages", "chapters"}
     missing = sorted(required - source.keys())
     if missing:
         raise ValueError("missing fields: " + ", ".join(missing))
@@ -835,7 +835,7 @@ def validate_stage2(source: dict[str, Any], stage1_receipt: dict[str, Any]) -> N
         raise ValueError("stage2 tender position does not match stage1")
 
 
-def validate_outline(chapters: Any, target_pages: int, coverage: Any, tender_position: str = "main") -> int:
+def validate_outline(chapters: Any, target_pages: int, coverage: Any = None, tender_position: str = "main") -> int:
     if not isinstance(chapters, list) or not chapters:
         raise ValueError("at least one chapter is required")
     seen_ids: set[str] = set()
@@ -874,16 +874,9 @@ def validate_outline(chapters: Any, target_pages: int, coverage: Any, tender_pos
         total += pages
     if total < target_pages:
         raise ValueError(f"planned pages {total} are below the confirmed target {target_pages}")
-    if not isinstance(coverage, dict):
-        raise ValueError("scoring coverage must be an object")
-    unmapped = coverage.get("unmapped")
-    if not isinstance(unmapped, list):
-        raise ValueError("unmapped scoring items must be an array")
-    position = normalize_tender_position(tender_position)
-    if position == "main" and unmapped:
-        raise ValueError("主标模式必须映射全部评分点")
-    if position == "companion" and not 2 <= len(unmapped) <= 3:
-        raise ValueError("陪标模式必须明确保留2至3个次要评分点不展开")
+    # Scoring coverage is retained as optional metadata when present, but it
+    # is not a Stage2 confirmation gate. A missing or partial AI coverage
+    # object must not block the outline, page-budget, and handoff workflow.
     return total
 
 
@@ -2176,6 +2169,8 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
                 data.get("coverage"),
                 tender_position_from_stage1_receipt(stage1_receipt),
             )
+            if not isinstance(data.get("coverage"), dict):
+                data["coverage"] = {}
             data["planned_pages"] = planned
             receipt = {
                 "schema_version": 1,

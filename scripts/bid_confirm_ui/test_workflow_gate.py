@@ -300,16 +300,39 @@ class WorkflowGateTest(unittest.TestCase):
             "tender_position": "companion",
         }, confirmed["receipt"])
 
-    def test_companion_coverage_requires_two_or_three_omissions(self) -> None:
+    def test_optional_scoring_coverage_does_not_block_outline(self) -> None:
         chapter = {"id": "c1", "title": "章节", "level": 1, "order": 1, "pages": 100, "children": []}
-        self.assertEqual(
-            bid_server.validate_outline([chapter], 100, {"total": 5, "mapped": 3, "unmapped": ["次要1", "次要2"]}, "companion"),
-            100,
-        )
-        with self.assertRaisesRegex(ValueError, "2至3"):
-            bid_server.validate_outline([chapter], 100, {"total": 5, "mapped": 5, "unmapped": []}, "companion")
-        with self.assertRaisesRegex(ValueError, "全部评分点"):
-            bid_server.validate_outline([chapter], 100, {"total": 5, "mapped": 3, "unmapped": ["次要1", "次要2"]}, "main")
+        for coverage in (None, {}, {"total": 5, "mapped": 0, "unmapped": ["待补充"]}, "未加载"):
+            with self.subTest(coverage=coverage):
+                self.assertEqual(bid_server.validate_outline([chapter], 100, coverage, "companion"), 100)
+
+    def test_stage2_recommendation_can_omit_optional_coverage(self) -> None:
+        stage1 = self._stage1("complete")
+        stage1["formatting"]["target_pages"] = 20
+        bid_server.atomic_write_json(self.data_dir / bid_server.STAGE1_INPUT, stage1)
+        stage1_receipt = self._receipt(bid_server.STAGE1_RECEIPT, {
+            "schema_version": 1,
+            "stage": "stage1",
+            "status": "confirmed",
+            "project_id": "gate-test",
+            "source_sha256": bid_server.sha256_data(stage1),
+            "data": stage1,
+            "confirmed_at": bid_server.utc_now(),
+        })
+        source = {
+            "schema_version": 1,
+            "stage": "stage2",
+            "project_id": "gate-test",
+            "generation_status": "complete",
+            "stage1_confirmation_sha256": stage1_receipt["confirmation_sha256"],
+            "target_pages": 20,
+            "chapters": [
+                {"id": "c1", "title": "章节一", "level": 1, "order": 1, "pages": 10, "children": []},
+                {"id": "c2", "title": "章节二", "level": 1, "order": 2, "pages": 10, "children": []},
+            ],
+        }
+        bid_server.validate_stage2(source, stage1_receipt)
+        self.assertEqual(bid_server.validate_outline(source["chapters"], 20), 20)
 
 
 if __name__ == "__main__":
