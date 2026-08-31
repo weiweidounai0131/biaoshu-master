@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "biaoshu-master",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "channel": "stable",
   "repository": "https://github.com/weiweidounai0131/biaoshu-master",
   "branch": "main",
