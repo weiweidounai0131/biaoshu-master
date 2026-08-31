@@ -82,14 +82,6 @@ Stage4 默认使用通用规则，也可以选择领域预设。用户可在确�
 
 ![Biaoshu Master workflow gallery](assets/screenshots/workflow-gallery.png)
 
-阶段2支持对目录、评分映射和篇幅预算提交 AI 整体调整：
-
-![阶段2 AI整体调整](assets/screenshots/stage2-ai-adjustment.png)
-
-阶段3会预填统一视觉方向，并为图片规划生成逐图提示词：
-
-![阶段3统一视觉方向预填](assets/screenshots/stage3-visual-prefill.png)
-
 ## 更新检测与双平台发布
 
 本 Skill 使用 `skill-version.json` 保存本地版本，按 GitHub Contents API、GitHub `refs/heads` 原始文件、GitCode Contents API 的顺序检查远端版本；GitHub 不通时自动切换 GitCode。更新检测不依赖本地 `.git`，Git 安装和 ZIP 安装使用同一套逻辑：
