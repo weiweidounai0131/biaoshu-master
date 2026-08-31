@@ -44,6 +44,8 @@ python3 scripts/project_workspace.py resolve \
 
 在同一工作区内，`prepare_intake.py --resume` 表示继续原运行；不带 `--resume` 表示重新开始一轮，旧确认状态和旧交付区会归档保留，避免新旧项目状态混用。
 
+Stage4的交付物保存位置由本机确认台选择：macOS使用系统文件夹选择器，Windows优先使用PowerShell原生文件夹对话框，选择器不可用时仍可粘贴绝对路径。生产与审校台运行期间可以只读回看前3个阶段；从前序阶段确认“修改本阶段”后，当前生产服务会先停止，旧交付轮次再归档。
+
 规则配置由 `scripts/rule_profiles.py` 管理：`list` 查看规则，`set-default <id>` 设置后续默认规则，`register` 登记用户确认的 Markdown 覆盖层。Stage4页面中的“新建专属规则”会给出标准对话引导语；规则制作模式不会启动标书生产。
 
 ## 界面示例

@@ -63,7 +63,10 @@
       const session = await response.json();
       const delivery = await deliveryResponse.json().catch(() => ({}));
       if (!response.ok || !session.ok) throw new Error(session.error || "流程状态读取失败");
-      if (delivery.delivery_ready && delivery.delivery_url) {
+      // Keep the three confirmed stages available for read-only review while
+      // Stage 4 is producing.  Only the Stage-4 confirmation page itself
+      // should hand off to the dedicated production/review service.
+      if (page === "stage4" && delivery.delivery_ready && delivery.delivery_url) {
         location.replace(delivery.delivery_url);
         return session;
       }

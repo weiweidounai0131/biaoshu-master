@@ -14,6 +14,7 @@ import json
 import os
 import platform
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -230,16 +231,18 @@ def archive_files(data_dir: Path, names: list[str], reason: str) -> list[str]:
 
 
 def archive_delivery_workspace(project_dir: Path, reason: str) -> str | None:
-    """Invalidate a running delivery round without deleting its audit trail.
+    """Stop and invalidate a running delivery round without deleting its audit trail.
 
     The production page reads its workflow link on a short interval.  Moving
     the manifest out of the active location makes any waiting/generating host
-    fail closed on its next protocol check, while the still-open browser can
-    receive the redirect instruction from its local service.
+    fail closed on its next protocol check.  Stop the detached delivery UI
+    first so an upstream edit cannot leave the old production service running
+    against the archived round.
     """
     source = project_dir / DELIVERY_DIR_NAME
     if not source.exists():
         return None
+    stop_delivery_service(project_dir)
     stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
     target = project_dir / DELIVERY_HISTORY_DIR_NAME / f"{stamp}-{reason}"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -594,26 +597,104 @@ def maybe_advance_to_stage1(data_dir: Path) -> dict[str, Any]:
     return workflow_state(data_dir)
 
 
+def _choose_tkinter_folder() -> list[str]:
+    """Open a portable folder picker when the platform has Tk available."""
+    import tkinter
+    from tkinter import filedialog
+
+    root = tkinter.Tk()
+    try:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.update()
+        selected = filedialog.askdirectory(title="选择交付物保存文件夹", parent=root)
+    finally:
+        root.destroy()
+    return normalized_paths([selected]) if selected else []
+
+
+def _choose_windows_folder() -> list[str]:
+    """Use the Windows native FolderBrowserDialog before falling back to Tk.
+
+    Some Windows Python distributions do not ship Tcl/Tk, and the previous
+    implementation treated that as the only picker.  Windows PowerShell is
+    part of the OS and can show the native folder dialog without requiring a
+    Python GUI package.
+    """
+    executable = next(
+        (candidate for name in ("powershell.exe", "pwsh.exe", "powershell", "pwsh")
+         if (candidate := shutil.which(name))),
+        None,
+    )
+    if not executable:
+        raise RuntimeError("未找到 PowerShell 文件夹选择器")
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = $utf8
+[Console]::OutputEncoding = $utf8
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '选择交付物保存文件夹'
+$dialog.ShowNewFolderButton = $false
+try {
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        [Console]::WriteLine($dialog.SelectedPath)
+    }
+} finally {
+    $dialog.Dispose()
+}
+"""
+    result = subprocess.run(
+        [
+            executable,
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-STA",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "PowerShell 文件夹选择器执行失败"
+        raise RuntimeError(detail)
+    return normalized_paths(result.stdout.splitlines())
+
+
 def choose_local_paths(kind: str) -> list[str]:
     if kind == "desktop":
         desktop = Path.home() / "Desktop"
         if not desktop.is_dir():
             raise ValueError("当前设备未找到桌面文件夹，请选择其他保存位置")
         return [str(desktop.resolve())]
+    if platform.system() == "Windows":
+        if kind not in {"folder", "output-folder"}:
+            raise ValueError("当前设备请粘贴本机绝对路径添加资料")
+        try:
+            return _choose_windows_folder()
+        except Exception:
+            try:
+                return _choose_tkinter_folder()
+            except Exception as tkinter_error:
+                raise ValueError("无法打开本机文件夹选择器，请直接粘贴绝对路径") from tkinter_error
     if sys.platform != "darwin":
         if kind not in {"folder", "output-folder"}:
             raise ValueError("当前设备请粘贴本机绝对路径添加资料")
         try:
-            import tkinter
-            from tkinter import filedialog
-            root = tkinter.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            selected = filedialog.askdirectory(title="选择交付物保存文件夹")
-            root.destroy()
+            return _choose_tkinter_folder()
         except Exception as exc:
             raise ValueError("无法打开本机文件夹选择器，请直接粘贴绝对路径") from exc
-        return normalized_paths([selected]) if selected else []
     if kind == "files":
         script = '''
 set chosenItems to choose file with prompt "选择要交给AI读取的标书资料" with multiple selections allowed
@@ -637,6 +718,55 @@ return POSIX path of chosenItem
             return []
         raise ValueError(result.stderr.strip() or "unable to open local path picker")
     return normalized_paths(result.stdout.splitlines())
+
+
+def stop_delivery_service(project_dir: Path) -> dict[str, Any]:
+    """Stop only the delivery-review service registered for this project.
+
+    Upstream stage edits must invalidate the old Stage-4 production round
+    immediately.  Request a graceful local shutdown first, then use the
+    existing platform-specific process terminator if the detached service does
+    not exit promptly.  A malformed or stale lock is treated as no live
+    service; the active delivery directory can still be archived safely.
+    """
+    source = project_dir / DELIVERY_DIR_NAME
+    lock_path = source / "lock.json"
+    if not lock_path.exists():
+        return {"stopped": False, "reason": "not-running"}
+    try:
+        lock = read_json(lock_path)
+        pid = int(lock.get("pid", 0))
+        port = int(lock.get("port", 0))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {"stopped": False, "reason": "invalid-lock"}
+    if pid <= 0 or pid == os.getpid() or not process_alive(pid):
+        return {"stopped": False, "reason": "stale-lock", "pid": pid}
+
+    shutdown_requested = False
+    if 1 <= port <= 65535:
+        request = urllib.request.Request(
+            f"http://{HOST}:{port}/api/shutdown",
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=2) as response:
+                response.read()
+            shutdown_requested = True
+        except (OSError, urllib.error.URLError):
+            pass
+
+    for _ in range(30):
+        if not process_alive(pid):
+            return {"stopped": True, "pid": pid, "shutdown_requested": shutdown_requested}
+        time.sleep(0.1)
+    terminated = _terminate_process(pid)
+    if not terminated and not process_alive(pid):
+        return {"stopped": True, "pid": pid, "shutdown_requested": shutdown_requested}
+    if not terminated or process_alive(pid):
+        raise OSError(f"无法停止当前项目的生产与审校服务（PID {pid}），已停止归档以避免旧任务继续写入")
+    return {"stopped": True, "pid": pid, "shutdown_requested": shutdown_requested, "forced": True}
 
 
 def process_alive(pid: int) -> bool:

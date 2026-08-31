@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import server as bid_server
@@ -106,6 +107,46 @@ class Stage4LifecycleTest(unittest.TestCase):
         self.assertIsNotNone(reopened['archived_delivery'])
         self.assertFalse(delivery_dir.exists())
         self.assertTrue(Path(reopened['archived_delivery']).is_dir())
+
+    def test_archive_delivery_stops_live_service_before_archiving(self) -> None:
+        delivery_dir = self.project_dir / bid_server.DELIVERY_DIR_NAME
+        delivery_dir.mkdir()
+        bid_server.atomic_write_json(delivery_dir / "lock.json", {"pid": 4242, "port": 5390})
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        with patch.object(bid_server, "process_alive", side_effect=[True, False]), patch.object(
+            bid_server.urllib.request, "urlopen", return_value=response
+        ) as urlopen:
+            archived = bid_server.archive_delivery_workspace(self.project_dir, "test-stop-before-archive")
+        self.assertIsNotNone(archived)
+        self.assertFalse(delivery_dir.exists())
+        urlopen.assert_called_once()
+
+
+class PlatformPickerTest(unittest.TestCase):
+    def test_windows_folder_picker_uses_sta_native_dialog(self) -> None:
+        completed = bid_server.subprocess.CompletedProcess(
+            args=["powershell.exe"], returncode=0, stdout="C:\\交付物\r\n", stderr=""
+        )
+
+        def which(name: str) -> str | None:
+            return "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" if name == "powershell.exe" else None
+
+        with patch.object(bid_server.shutil, "which", side_effect=which), patch.object(
+            bid_server.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertEqual(bid_server._choose_windows_folder(), ["C:\\交付物"])
+        command = run.call_args.args[0]
+        self.assertIn("-STA", command)
+        self.assertIn("System.Windows.Forms.FolderBrowserDialog", command[-1])
+
+
+class NavigationStaticTest(unittest.TestCase):
+    def test_confirm_pages_only_handoff_stage4_to_delivery_service(self) -> None:
+        path = Path(__file__).resolve().parent / "static" / "workflow-nav.js"
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('page === "stage4" && delivery.delivery_ready && delivery.delivery_url', source)
 
 
 if __name__=="__main__":unittest.main()
