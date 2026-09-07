@@ -2616,7 +2616,7 @@ def ensure_confirmation_page(project_dir: Path, stage: str) -> dict[str, Any]:
     opened, method = open_local_browser(url)
     mark_page_open_attempt(data_dir, url, opened, method)
     log_callback_event(data_dir, "confirmation_page_restore_attempt", stage, f"opened={opened}; method={method}")
-    print(f"{url} [page_restore={'opened' if opened else 'failed'} method={method}]", flush=True)
+    print(f"{url} [page_restore={'opened' if opened else 'failed'} method={method} page_heartbeat=pending]", flush=True)
     return {"action": "opened" if opened else "open_failed", **page_presence_status(data_dir)}
 
 
@@ -2685,7 +2685,7 @@ def launch_daemon(project_dir: Path, requested_port: int | None, no_browser: boo
             mark_page_open_attempt(project_dir / DATA_DIR_NAME, url, browser_opened, browser_method)
             if not browser_opened:
                 print(f"自动打开浏览器失败（{browser_method}）；确认台服务已启动，请使用输出地址恢复。", file=sys.stderr)
-            print(f"{url} [browser_opened={'true' if browser_opened else 'false'} method={browser_method}]")
+            print(f"{url} [browser_opened={'true' if browser_opened else 'false'} method={browser_method} page_heartbeat=pending]")
             return 0
         time.sleep(0.15)
     print("Confirmation service failed to start", file=sys.stderr)

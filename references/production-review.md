@@ -139,13 +139,22 @@ AI按阶段4批次顺序生成结构化权威稿、执行本地结构与页数�
 
 当前AI必须完整读取项目内`stage4-writing-rules.md`，再读取本批结构化源稿、Word导出和本地导出校验结果，逐块复核：规则硬约束、项目事实与承诺边界、阶段2一至三级骨架和评分覆盖、完全/近似重复段落、跨批术语与成果衔接、Word格式和页数预算。复校还要结合已确认批次检查分批切割造成的重复、断裂或过渡残留。复校报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`，并在`summary`中如实填写覆盖块数和问题数；每个问题必须给出位置、证据和处理建议。
 
-AI完成复校后，将完整报告写入临时JSON，再执行：
+AI完成复校后，推荐先使用模板脚本自动绑定当前项目与文件摘要，避免手动复制SHA：
+
+```bash
+python3 scripts/bid_delivery_ui/create_ai_recheck_template.py <project_dir> \
+  --batch word-batch-1
+```
+
+模板默认写入`bid_delivery/results/ai-recheck-template-batch-NN.json`，初始状态为`running`，不会自动通过复校。当前AI只修改检查者、`rules_read`、`scope`、摘要、问题清单和最终`status`；模板中的项目、授权、源稿、Word和规则摘要必须保留。填写完整报告后，再执行：
 
 ```bash
 python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> \
   --batch word-batch-1 \
   --report <ai-recheck-report.json>
 ```
+
+AI完成复校后，也可以直接提供已经完整绑定的临时JSON，再执行上述登记命令。登记脚本和服务端仍会严格校验所有摘要、范围、覆盖数量和问题级别。
 
 报告必须是完整JSON对象，至少按以下结构提供全部字段；下面的覆盖数量只是示意，实际必须填写源稿真实数量（不得用0代替）；`findings`为空时表示没有需要记录的问题，存在问题时必须逐条填写完整问题对象：
 

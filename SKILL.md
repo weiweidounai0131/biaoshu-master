@@ -74,7 +74,7 @@ description: 面向所有行业正式投标与方案竞标场景的本地优先�
 
 本地确认台是默认且必经的流程，适用于 Codex、WorkBuddy 及其他宿主。AI 不得因为“当前没有浏览器点击工具”“无法代替用户点击”或自行判断环境没有浏览器，就直接改用聊天确认。
 
-每次首次进入流程时，必须在同一个前台命令中实际执行 `python3 scripts/bid_confirm_ui/server.py <project_dir> --daemon --wait --wait-stage intake --wait-timeout 0`。该命令会启动服务、尝试打开浏览器并直接阻塞等待入口回执；输出中的`browser_opened=true/false`必须记录并核对。不得传入`--no-browser`，不得拆成后台任务后再回复用户。自动打开失败时只能报告真实失败原因和本地地址，不得把“AI不能点击浏览器”当成失败理由，也不得擅自改成聊天确认。
+每次首次进入流程时，必须在同一个前台命令中实际执行 `python3 scripts/bid_confirm_ui/server.py <project_dir> --daemon --wait --wait-stage intake --wait-timeout 0`。该命令会启动服务、尝试打开浏览器并直接阻塞等待入口回执；输出中的`browser_opened=true/false`只表示系统已接受或拒绝打开请求，不代表用户已经看到窗口；`page_heartbeat=pending`必须等页面实际加载并上报心跳后才算页面已打开。无论打开请求结果如何，当前AI都必须在用户可见回复中给出本地确认台URL。不得传入`--no-browser`，不得拆成后台任务后再回复用户。自动打开失败时只能报告真实失败原因和本地地址，不得把“AI不能点击浏览器”当成失败理由，也不得擅自改成聊天确认。
 
 **浏览器通知：** 确认台在用户首次点击入口“确认并开始分析”时，可请求 Chrome 的本地通知权限；用户允许后，页面在实际切换到下一阶段前发送一次通知。通知只适用于 Chrome 内核的 macOS 和 Windows，拒绝、无痕模式或系统通知关闭时必须静默降级，不能阻塞确认、等待或页面切换。
 
@@ -248,7 +248,7 @@ Stage4写作不是“拿到资料后自由发挥”。正式生成任何正文�
 
 当前生产与审校台已支持交付总览、批次导航、按内容块懒加载阅读、受控回修、Word导出和图片规划Excel导出。每个Word批次必须先写入符合协议的`source/batch-NN.json`，再由`scripts/bid_delivery_ui/export_word.py`生成Word、执行本地结构校验并登记哈希；登记后批次必然进入`ai_rechecking`，不得把聊天文本或旧Word直接当成权威稿。
 
-**AI复校是人工审阅前的硬闸门：** 当前AI必须在每次Word导出登记后完整读取项目内`bid_delivery/stage4-writing-rules.md`、本批结构化源稿、Word和`results/word-batch-NN-validation.json`，重新核对规则硬约束、项目事实、阶段2一至三级骨架、评分覆盖、完全或近似重复段落、跨批术语与成果衔接、Word格式和页数预算。报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`；每个问题都要写明位置、证据和处理建议，不能只写“已检查”。将完整报告写入临时JSON后，执行`python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> --batch <batch_id> --report <report.json>`。只有`status: passed`且没有`blocking`问题才会开放网页正文和确认按钮；`failed`会退回`regenerating`，当前AI修复并重新导出、复校。任何人工操作和最终确认都不能绕过这个闸门。
+**AI复校是人工审阅前的硬闸门：** 当前AI必须在每次Word导出登记后完整读取项目内`bid_delivery/stage4-writing-rules.md`、本批结构化源稿、Word和`results/word-batch-NN-validation.json`，重新核对规则硬约束、项目事实、阶段2一至三级骨架、评分覆盖、完全或近似重复段落、跨批术语与成果衔接、Word格式和页数预算。建议先运行`python3 scripts/bid_delivery_ui/create_ai_recheck_template.py <project_dir> --batch <batch_id>`生成绑定当前项目、批次、规则、源稿和Word摘要的模板；AI只填写检查结论，不手抄64位SHA。报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`；每个问题都要写明位置、证据和处理建议，不能只写“已检查”。将完整报告写入临时JSON后，执行`python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> --batch <batch_id> --report <report.json>`。模板初始`status: running`不能直接提交，完成检查后必须改为`passed`或`failed`，并确认`rules_read: true`。只有`status: passed`且没有`blocking`问题才会开放网页正文和确认按钮；`failed`会退回`regenerating`，当前AI修复并重新导出、复校。任何人工操作和最终确认都不能绕过这个闸门。
 
 正文生成采用“目录先行、深度优先”的顺序：先按已确认的一至三级骨架建立本批标题树，再填充正文。页数不足时，严格按“扩展已有段落（讲透方法、步骤、角色、边界、验证和成果）→在已有三级标题下挂靠四级标题→必要时挂靠更深层标题→补充适合的表格或列表”执行。禁止追加无父级的独立模块、用空泛段落或靠连续增加标题凑页。每个新增标题都要能回答：它是否是真实子主题、是否能写出至少两块有逻辑的支撑内容、删除后原章节是否不完整。
 

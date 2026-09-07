@@ -163,7 +163,7 @@ python3 scripts/bid_confirm_ui/server.py <project_dir> --wait-only --wait-stage 
 python3 scripts/bid_confirm_ui/server.py <project_dir> --shutdown
 ```
 
-- 默认从`127.0.0.1:5380`开始选择空闲端口，由确认台启动器尝试打开浏览器并返回`browser_opened=true/false`；服务子进程只负责HTTP，不重复开页。首次启动必须运行`--daemon --wait --wait-stage intake --wait-timeout 0`，同一前台命令直接等待入口回执；不得传入`--no-browser`，不得创建后台等待任务。服务返回的本地地址、浏览器打开结果和`/api/health`结果必须写入项目日志。
+- 默认从`127.0.0.1:5380`开始选择空闲端口，由确认台启动器尝试打开浏览器并返回`browser_opened=true/false`和`page_heartbeat=pending`；`browser_opened`只表示系统接受或拒绝打开请求，不代表用户已经看到窗口，页面实际加载后必须通过`/api/page-presence`心跳确认。服务子进程只负责HTTP，不重复开页。首次启动必须运行`--daemon --wait --wait-stage intake --wait-timeout 0`，同一前台命令直接等待入口回执；不得传入`--no-browser`，不得创建后台等待任务。无论浏览器打开请求结果如何，当前AI都必须向用户展示本地确认台地址；服务返回的本地地址、浏览器打开结果、页面心跳和`/api/health`结果必须写入项目日志。
 - 每次新一轮入口准备默认运行`prepare_intake.py`创建新的`run_id`并归档旧状态；仅在明确恢复中断轮次时使用`--resume`。入口文件存在但回执哈希或`run_id`失配时必须fail-closed，不能启用旧项目兼容路径。
 - 同一项目已有健康服务时，`--daemon`只附着并打印既有地址，不得再次打开浏览器；AI也不得额外调用浏览器工具或系统`open`命令。阶段切换、重试和恢复复用同一个页面。
 - 首次启动前必须先完成`prepare_intake.py`并校验`intake-recommendations.json`的`prefill_ready: true`。服务会拒绝未就绪入口，防止AI在提取对话信息前先弹出空白窗口；入口准备与网页启动不得并行。

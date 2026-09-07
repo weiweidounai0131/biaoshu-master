@@ -19,7 +19,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from bid_confirm_ui import server as confirm_ui
-from bid_delivery_ui import export_image_plan, export_word, protocol
+from bid_delivery_ui import create_ai_recheck_template, export_image_plan, export_word, protocol
 import rule_profiles
 
 
@@ -209,6 +209,23 @@ class DeliveryProtocolTest(unittest.TestCase):
         rules_path.write_bytes(tampered)
         with self.assertRaisesRegex(ValueError, "规则缺失或已被替换"):
             protocol.load_manifest(self.project_dir)
+
+    def test_ai_recheck_template_binds_current_artifact_hashes(self) -> None:
+        protocol.initialize_delivery(self.project_dir)
+        protocol.begin_active_batch(self.project_dir)
+        self._write_artifacts("word-batch-1", "template")
+        protocol.register_batch_artifacts(self.project_dir, "word-batch-1")
+
+        template = create_ai_recheck_template.build_template(self.project_dir, "word-batch-1")
+        manifest = protocol.load_manifest(self.project_dir)
+        batch = next(item for item in manifest["word_batches"] if item["id"] == "word-batch-1")
+        self.assertEqual(template["status"], "running")
+        self.assertEqual(template["project_id"], manifest["project_id"])
+        self.assertEqual(template["stage4_confirmation_sha256"], manifest["stage4_confirmation_sha256"])
+        self.assertEqual(template["source_sha256"], batch["source_sha256"])
+        self.assertEqual(template["export_sha256"], batch["export_sha256"])
+        self.assertEqual(template["writing_rules_sha256"], manifest["writing_rules"]["project_sha256"])
+        self.assertEqual(template["summary"]["checked_blocks"], len(protocol.read_json(protocol.delivery_dir(self.project_dir) / batch["source_path"])["blocks"]))
 
     def test_selected_generation_rule_is_bound_to_project_snapshot(self) -> None:
         receipt_path = self.data_dir / confirm_ui.STAGE4_RECEIPT
