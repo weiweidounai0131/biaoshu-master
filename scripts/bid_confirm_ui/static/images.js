@@ -60,13 +60,13 @@ async function pollNextStage() {
     const wait = callback.agent_wait;
     if (session.stage === "stage4" && session.handoff_ready && wait?.status === "waiting" && wait?.stage === "stage4" && wait.process_alive) {
       stopNextWait();
-      setNextStageStatus("最终交付方案已生成，正在进入下一阶段…");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
       window.BiaoshuNotifications?.notify("最终交付方案已生成，正在进入第 04 阶段。");
       location.replace("/final.html");
       return;
     }
     if (wait?.stage === "stage4" && wait?.status === "waiting" && wait.process_alive) {
-      setNextStageStatus("AI正在读取本阶段回执并生成最终交付方案…");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
       return;
     }
     if (callback.handoff_failed && callback.target_stage === "stage4") {
@@ -74,12 +74,12 @@ async function pollNextStage() {
       return;
     }
     if (callback.generation_delayed && callback.target_stage === "stage4") {
-      setNextStageStatus("AI仍在生成最终交付方案，内容较多时会耗时更长，请保持本页打开");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
       return;
     }
-    setNextStageStatus("确认已保存，正在等待当前对话接续处理…");
+    setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
   } catch (_) {
-    setNextStageStatus("正在确认AI接续状态，请保持本页打开…");
+    setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
   }
 }
 

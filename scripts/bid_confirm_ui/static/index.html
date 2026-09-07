@@ -152,14 +152,14 @@
     </div>
   </div>
   <div class="success-modal" id="success-modal" hidden>
-    <div class="success-card"><div class="check">✓</div><h2>项目口径已确认</h2><p>确认结果已安全保存，当前对话中的AI正在读取回执并生成标书框架。完成后本页将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>正在等待AI接续处理</div><button id="close-success">留在当前页面检查</button></div>
+    <div class="success-card"><div class="check">✓</div><h2>项目口径已确认</h2><p>确认结果已安全保存，当前对话中的AI正在读取回执并生成标书框架。完成后本页将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>AI处理中，若对话已结束请回复“接续”让对话继续</div><button id="close-success">留在当前页面检查</button></div>
   </div>
   <div class="success-modal" id="reopen-modal" hidden>
     <div class="success-card warning-card"><div class="warning-icon">!</div><h2>从项目口径阶段重新开始？</h2><p>确认后，本页将恢复为可编辑状态，现有标书框架及其后续结果会失效并保存到历史记录。你需要重新提交项目口径，等待AI重新生成框架，不能直接回到原来的下一阶段。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认并开始修改</button></div></div>
   </div>
-  <script src="/workflow-shared.js?v=1"></script>
+  <script src="/workflow-shared.js?v=2"></script>
   <script src="/workflow-nav.js?v=3"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

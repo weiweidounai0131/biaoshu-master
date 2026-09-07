@@ -228,7 +228,7 @@ function stopStageWait() {
 function startStageWait() {
   stopStageWait();
   state.stageWait.startedAt = Date.now();
-  setNextStageStatus("正在等待AI接续处理");
+  setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
   pollStageWait();
 }
 
@@ -247,16 +247,16 @@ async function pollStageWait() {
       return;
     }
     if (wait?.stage === "stage2" && wait?.status === "waiting" && wait.process_alive) {
-      setNextStageStatus("AI正在读取已确认内容并生成标书框架");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
     } else if (callback.handoff_failed && callback.target_stage === "stage2") {
       setNextStageStatus("后台等待已中断、超时或被前序修改撤销。确认记录已保留；请重新打开原对话恢复，恢复后本页会自动跳转，旧页面请刷新一次。", true);
     } else if (callback.generation_delayed && callback.target_stage === "stage2") {
-      setNextStageStatus("AI仍在生成标书框架，内容较多时会耗时更长，请保持本页打开");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
     } else {
-      setNextStageStatus("确认已保存，正在等待AI接续处理");
+      setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
     }
   } catch (error) {
-    setNextStageStatus("本地状态检测暂时不可用，正在重试…", false);
+    setNextStageStatus(window.BiaoshuWorkflow.continuationHint);
   }
   state.stageWait.pollTimer = window.setTimeout(pollStageWait, 1200);
 }

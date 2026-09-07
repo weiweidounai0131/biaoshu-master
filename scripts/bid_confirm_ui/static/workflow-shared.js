@@ -1,4 +1,6 @@
 (function () {
+  const CONTINUATION_HINT = 'AI处理中，若对话已结束请回复“接续”让对话继续';
+
   function setStatus(node, message, warning) {
     if (!node) return;
     node.classList.toggle("wait-warning", Boolean(warning));
@@ -30,5 +32,6 @@
   }
 
   window.BiaoshuWorkflow = window.BiaoshuWorkflow || {};
+  window.BiaoshuWorkflow.continuationHint = CONTINUATION_HINT;
   window.BiaoshuWorkflow.setStatus = setStatus;
 }());

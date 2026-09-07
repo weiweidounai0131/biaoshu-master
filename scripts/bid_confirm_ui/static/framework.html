@@ -73,7 +73,7 @@
     </footer>
   </div>
   <div class="toast" id="toast"></div>
-  <div class="success-modal" id="success-modal" hidden><div class="success-card"><div class="check">✓</div><h2>标书框架已确认</h2><p>目录结构、顺序、篇幅和评分映射已安全保存。当前对话中的AI正在读取回执并生成图片规划，完成后页面将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>正在等待AI接续处理</div><button id="close-success">留在当前页面检查</button></div></div>
+  <div class="success-modal" id="success-modal" hidden><div class="success-card"><div class="check">✓</div><h2>标书框架已确认</h2><p>目录结构、顺序、篇幅和评分映射已安全保存。当前对话中的AI正在读取回执并生成图片规划，完成后页面将自动进入下一阶段。</p><div class="next-status" id="next-stage-status"><span class="spinner"></span>AI处理中，若对话已结束请回复“接续”让对话继续</div><button id="close-success">留在当前页面检查</button></div></div>
   <div class="success-modal" id="reopen-modal" hidden>
     <div class="success-card warning-card">
       <div class="warning-mark">!</div>
@@ -91,9 +91,9 @@
       <div class="rebalance-status" id="rebalance-status" hidden><span class="spinner"></span>AI正在依据新的页数重新分配二、三级标题…</div>
     </div>
   </div>
-  <script src="/workflow-shared.js?v=1"></script>
+  <script src="/workflow-shared.js?v=2"></script>
   <script src="/workflow-nav.js?v=3"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/framework.js?v=12"></script>
+  <script src="/framework.js?v=13"></script>
 </body>
 </html>
