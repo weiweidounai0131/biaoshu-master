@@ -74,9 +74,6 @@ def main() -> int:
     if tender_position not in {"main", "companion"}:
         parser.error("intake tender_position must be main or companion")
     target_pages = 100 if tender_position == "companion" else 700
-    default_notes = ["评分表的商务部分不用写"]
-    if tender_position == "companion":
-        default_notes.append("内容不要精准，选择2~3个不重要的评分点不写")
     recommendation = {
         "schema_version": 1,
         "stage": "stage1",
@@ -112,9 +109,19 @@ def main() -> int:
             "bidder_name": "我司",
         },
         "scoring": {
-            "bid_scope": "技术部分和服务部分；评分表的商务部分不写；其余以本项目正式文件为准。",
+            "bid_scope": "技术与服务评分内容默认纳入；商务部分默认从本轮评分核对与标题清单中移除，用户明确要求纳入时再恢复。",
             "summary": "",
             "evidence_boundary": "仅在招标文件或评分表明确要求时设置证明材料位置。",
+        },
+        "scoring_extraction": {
+            "schema_version": 1,
+            "status": "pending",
+            "source_criterion_count": 0,
+            "source_total_criterion_count": 0,
+            "omitted_categories": [],
+            "no_rubric_reason": "",
+            "reviewed": False,
+            "criteria": [],
         },
         "formatting": {
             "font_family": "仿宋_GB2312",
@@ -131,7 +138,7 @@ def main() -> int:
             "pending_items": "",
             "forbidden_content": "不得虚构公司、人员、证书、业绩、系统、数据或客户授权；不得写入内部资料来源和制作痕迹。",
         },
-        "additional_notes": "\n".join(default_notes),
+        "additional_notes": "",
     }
     target = data_dir / "stage1-recommendations.json"
     write_json(target, recommendation)

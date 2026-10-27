@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>标书确认台</title>
-  <link rel="stylesheet" href="/style.css?v=8">
+  <link rel="stylesheet" href="/style.css?v=9">
+  <link rel="stylesheet" href="/scoring-review.css?v=2">
   <link rel="stylesheet" href="/workflow-shared.css?v=2">
 </head>
 <body data-page-stage="stage1">
@@ -54,13 +55,32 @@
             <label>关键数量与时限<textarea name="project.key_quantities" rows="4"></textarea></label>
             <label>核心名词解释<textarea name="project.terminology" rows="4"></textarea></label>
             <label>本次标书范围<textarea name="scoring.bid_scope" rows="3"></textarea></label>
-            <label>评分点概括<textarea name="scoring.summary" rows="3"></textarea></label>
+            <label>必须优先出现的二级标题概括<textarea name="scoring.summary" rows="3"></textarea></label>
           </div>
           <label>证明材料边界<textarea name="scoring.evidence_boundary" rows="3"></textarea></label>
         </section>
 
+        <section class="card scoring-review-card" id="scoring-review-card">
+          <div class="section-head">
+            <div class="number">3</div>
+            <div><h2>评分表逐项核对</h2><p>保留完整评分标准，只确认必须优先出现的二级标题</p></div>
+          </div>
+          <div class="scoring-review-intro">
+            <p>黄色标记只指出标题依据。分值、人数门槛、证明材料和评分档次仍留在原文中，后续框架阶段再按需要细化，不会自动变成多个标题。</p>
+            <div class="scoring-review-counts" id="scoring-review-counts"></div>
+          </div>
+          <div id="scoring-omitted-note" class="scoring-omitted-note" hidden></div>
+          <div id="scoring-extraction-status" class="scoring-extraction-status" role="status"></div>
+          <div class="scoring-table-wrap" id="scoring-extraction-content"></div>
+          <label class="scoring-review-confirm" id="scoring-review-confirm">
+            <input type="checkbox" id="scoring-reviewed">
+            <span>我已核对必须优先出现的二级标题、数量、顺序和纳入范围，确认没有遗漏。</span>
+          </label>
+          <p class="scoring-review-help">如发现漏项、错字或顺序不对，请先不要确认，在对话中告诉AI修正后再刷新本页核对。确认后，框架阶段会在这些标题之后补充支撑章节和必要的下级标题。</p>
+        </section>
+
         <section class="card">
-          <div class="section-head"><div class="number">3</div><div><h2>Word排版与篇幅</h2><p>技能默认规范，可根据本次招标文件进行覆盖</p></div><button type="button" class="text-button" id="restore-format">恢复默认</button></div>
+          <div class="section-head"><div class="number">4</div><div><h2>Word排版与篇幅</h2><p>技能默认规范，可根据本次招标文件进行覆盖</p></div><button type="button" class="text-button" id="restore-format">恢复默认</button></div>
           <div class="format-grid">
             <label>字体<input name="formatting.font_family"></label>
             <label>字号<input name="formatting.font_size"></label>
@@ -74,7 +94,7 @@
         </section>
 
         <section class="card">
-          <div class="section-head"><div class="number">4</div><div><h2>事实边界与补充事项</h2><p>帮助AI区分确定事实、风险事项和禁止写入内容</p></div></div>
+          <div class="section-head"><div class="number">5</div><div><h2>事实边界与补充事项</h2><p>帮助AI区分确定事实、风险事项和禁止写入内容</p></div></div>
           <div class="boundary-grid">
             <label class="boundary confirmed"><span>已确认事实</span><textarea name="boundaries.confirmed_facts" rows="5"></textarea></label>
             <label class="boundary pending"><span>待确认事项</span><textarea name="boundaries.pending_items" rows="5"></textarea></label>
@@ -106,7 +126,7 @@
           <fieldset class="intake-position">
             <legend>标书定位 <span>必选</span></legend>
             <label><input type="radio" name="tender-position" value="main" checked><span><strong>主标</strong><small>完整、准确覆盖评分要求，沿用主标深度与篇幅规划</small></span></label>
-            <label><input type="radio" name="tender-position" value="companion"><span><strong>陪标</strong><small>默认 100 页，可调整；保留 2 至 3 个次要评分点不展开</small></span></label>
+            <label><input type="radio" name="tender-position" value="companion"><span><strong>陪标</strong><small>默认 100 页，可调整；纳入范围的评分点仍按顺序编入框架</small></span></label>
           </fieldset>
           <label class="intake-background">项目背景<span>必填</span><textarea id="intake-background" rows="6" required placeholder="请说明标书面向的客户、项目目标、服务范围及其他重要背景。"></textarea></label>
           <div class="intake-materials">
@@ -145,7 +165,7 @@
         <div class="analysis-steps">
           <div class="done"><b>✓</b><span><strong>项目背景已接收</strong><small>已锁定本次分析范围</small></span></div>
           <div class="done"><b>✓</b><span><strong id="analysis-material-title">本地资料路径已确认</strong><small id="analysis-material-detail">正在建立资料索引</small></span></div>
-          <div class="active"><b><i></i></b><span><strong>提取事实、评分点与排版要求</strong><small>完成后将自动进入第一阶段</small></span></div>
+          <div class="active"><b><i></i></b><span><strong>提取事实、必需标题与排版要求</strong><small>完成后将自动进入第一阶段</small></span></div>
         </div>
         <div class="analysis-progress"><span></span></div>
       </section>
@@ -160,6 +180,6 @@
   <script src="/workflow-shared.js?v=2"></script>
   <script src="/workflow-nav.js?v=3"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/app.js?v=14"></script>
+  <script src="/app.js?v=16"></script>
 </body>
 </html>

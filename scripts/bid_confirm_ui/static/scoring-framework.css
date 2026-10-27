@@ -1,0 +1,5 @@
+.score-factor-tag,.score-point-tag{display:inline-flex;align-items:center;width:max-content;margin:7px 0 0;padding:4px 7px;border:1px solid #e9c7ca;border-radius:7px;color:#a52a35;background:#fff1f2;font-size:9px;font-weight:800;letter-spacing:.1px}
+.score-point-node{border-color:#e5bfc4!important;background:linear-gradient(145deg,#fff,#fff9f9)!important;box-shadow:0 8px 20px rgba(167,28,42,.06)!important}
+.score-point-node .node-copy{align-items:flex-start}
+.score-factor-node{border-color:#e5bfc4!important}
+.stage-readonly .score-point-node{cursor:default}

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>标书框架确认 · 标书确认台</title>
   <link rel="stylesheet" href="/framework.css?v=7">
+  <link rel="stylesheet" href="/scoring-framework.css?v=1">
   <link rel="stylesheet" href="/workflow-shared.css?v=4">
 </head>
 <body data-page-stage="stage2">
@@ -18,7 +19,7 @@
         <button class="step locked" id="go-stage3" data-stage="stage3"><span>03</span><div><strong>图片规划</strong><small id="stage3-step-status">尚未解锁</small></div></button>
         <button class="step locked" data-stage="stage4"><span>04</span><div><strong>最终确认</strong><small>尚未解锁</small></div></button>
       </nav>
-      <div class="legend"><strong>框架显示说明</strong><p>页面完整保留一级至三级标题。四至六级由AI在获授权的三级节点下自然细化。</p><div><span class="dot l1"></span>一级章节</div><div><span class="dot l2"></span>二级标题</div><div><span class="dot l3"></span>三级标题</div></div>
+      <div class="legend"><strong>框架显示说明</strong><p>页面展示一级至三级标题。正文阶段可根据实际内容，在任何三级标题下继续细化四至六级标题。</p><div><span class="dot l1"></span>一级章节</div><div><span class="dot l2"></span>二级标题</div><div><span class="dot l3"></span>三级标题</div></div>
     </aside>
 
     <main class="workspace">
@@ -59,9 +60,8 @@
       <div class="drawer-body">
         <label>标题名称<textarea id="edit-title" rows="3"></textarea></label>
         <label id="pages-field">章节预计页数<input id="edit-pages" type="number" min="0" max="5000"></label>
-        <label>对应评分点<textarea id="edit-scores" rows="3" placeholder="每行一个评分点"></textarea></label>
+        <label>对应的必需二级标题<textarea id="edit-scores" rows="3" placeholder="每行一个已确认的必需标题"></textarea></label>
         <label>对应需求条款<textarea id="edit-requirements" rows="3" placeholder="每行一个需求条款"></textarea></label>
-        <label class="switch-row"><span><strong>允许继续细化</strong><small>正文写作时可在此节点下自然拆分四至六级标题</small></span><input id="edit-deeper" type="checkbox"><i></i></label>
         <div class="node-actions"><button id="move-up">上移</button><button id="move-down">下移</button><button id="add-child">添加下级</button><button class="danger" id="delete-node">删除节点</button></div>
       </div>
       <div class="drawer-foot"><button id="cancel-edit">取消</button><button class="primary" id="save-edit">保存修改</button></div>
@@ -94,6 +94,6 @@
   <script src="/workflow-shared.js?v=2"></script>
   <script src="/workflow-nav.js?v=3"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/framework.js?v=13"></script>
+  <script src="/framework.js?v=14"></script>
 </body>
 </html>

@@ -939,6 +939,187 @@ def validate_stage1(source: dict[str, Any]) -> None:
         normalize_tender_position(source.get("tender_position"))
 
 
+def validate_scoring_extraction(extraction: Any, require_review: bool = True) -> None:
+    """Validate the user-reviewed, source-backed score-point table from Stage 1."""
+    if not isinstance(extraction, dict):
+        raise ValueError("评分表尚未逐项分析，请先完成必需二级标题核对")
+    if extraction.get("schema_version") != 1:
+        raise ValueError("Stage1标题提取结构版本不受支持，请重新生成核对结果")
+    status = extraction.get("status")
+    criteria = extraction.get("criteria")
+    if not isinstance(criteria, list):
+        raise ValueError("评分标准必须逐项列出")
+    try:
+        source_count = int(extraction.get("source_criterion_count", -1))
+    except (TypeError, ValueError):
+        raise ValueError("评分表识别到的标准数量无效")
+    if source_count != len(criteria):
+        raise ValueError(f"评分表识别到 {source_count} 条标准，但表中列出 {len(criteria)} 条，请补齐后再确认")
+    if require_review and extraction.get("reviewed") is not True:
+        raise ValueError("请先勾选已核对评分因素、原文和必需二级标题数量与顺序")
+
+    if status == "no_rubric":
+        if criteria or source_count != 0:
+            raise ValueError("标记为无评分表时，评分标准列表必须为空")
+        if not str(extraction.get("no_rubric_reason", "")).strip():
+            raise ValueError("请说明为什么本项目没有需要提取的评分表")
+        return
+    if status != "ready":
+        raise ValueError("评分表提取尚未完成，请让AI完整读取评分表后刷新页面")
+    if not criteria:
+        raise ValueError("评分表提取结果为空，请检查评分文件是否已读取")
+
+    criterion_ids: set[str] = set()
+    factor_labels: dict[str, str] = {}
+    point_ids: set[str] = set()
+    for criterion_index, criterion in enumerate(criteria, 1):
+        if not isinstance(criterion, dict):
+            raise ValueError(f"第 {criterion_index} 条评分标准格式无效")
+        criterion_id = str(criterion.get("criterion_id", "")).strip()
+        factor_id = str(criterion.get("factor_id", "")).strip()
+        factor = str(criterion.get("factor", "")).strip()
+        requirement_text = str(criterion.get("requirement_text", ""))
+        scoring_rule = str(criterion.get("scoring_rule", ""))
+        if not criterion_id or criterion_id in criterion_ids:
+            raise ValueError("评分标准编号必须填写且不能重复")
+        criterion_ids.add(criterion_id)
+        if not factor_id or not factor:
+            raise ValueError(f"第 {criterion_index} 条评分标准缺少评分因素")
+        previous_factor = factor_labels.setdefault(factor_id, factor)
+        if previous_factor != factor:
+            raise ValueError(f"评分因素“{previous_factor}”的名称不一致")
+        if not requirement_text.strip() and not scoring_rule.strip():
+            raise ValueError(f"第 {criterion_index} 条评分标准原文为空")
+        if not isinstance(criterion.get("in_scope"), bool):
+            raise ValueError(f"第 {criterion_index} 条评分标准的纳入范围状态无效")
+        if not criterion["in_scope"] and not str(criterion.get("exclusion_reason", "")).strip():
+            raise ValueError(f"第 {criterion_index} 条评分标准未纳入框架，请填写原因")
+        points = criterion.get("points")
+        if not isinstance(points, list) or not points:
+            raise ValueError(f"第 {criterion_index} 条评分标准没有提取出必需二级标题")
+        for point_index, point in enumerate(points, 1):
+            if not isinstance(point, dict):
+                raise ValueError(f"第 {criterion_index} 条的第 {point_index} 个评分点格式无效")
+            point_id = str(point.get("point_id", "")).strip()
+            title = str(point.get("title", "")).strip()
+            if not point_id or point_id in point_ids:
+                raise ValueError("评分点编号必须填写且不能重复")
+            point_ids.add(point_id)
+            if not title:
+                raise ValueError(f"第 {criterion_index} 条的第 {point_index} 个二级标题不能为空")
+            if point.get("order") != point_index:
+                raise ValueError(f"“{title}”的评分点顺序编号无效")
+            quotes = point.get("source_quotes")
+            if not isinstance(quotes, list) or not quotes:
+                raise ValueError(f"“{title}”缺少对应的评分表原文标记")
+            for quote in quotes:
+                if not isinstance(quote, dict):
+                    raise ValueError(f"“{title}”的原文标记格式无效")
+                field = quote.get("field")
+                text = str(quote.get("text", ""))
+                source_text = factor if field == "factor" else requirement_text if field == "requirement_text" else scoring_rule if field == "scoring_rule" else None
+                if source_text is None or len(text.strip()) < 2 or text not in source_text:
+                    raise ValueError(f"“{title}”的原文标记未能在对应评分标准中找到，请修正后再确认")
+
+
+def validate_scorepoint_outline(chapters: Any, extraction: Any) -> None:
+    """Require confirmed scoring points to be exact, ordered level-2 headings."""
+    if not isinstance(extraction, dict):
+        return  # Existing projects confirmed before this feature remain readable.
+    validate_scoring_extraction(extraction)
+    if extraction.get("status") == "no_rubric":
+        return
+
+    factor_names: dict[str, str] = {}
+    expected_by_factor: dict[str, list[dict[str, str]]] = {}
+    for criterion in extraction["criteria"]:
+        if not criterion["in_scope"]:
+            continue
+        factor_id = str(criterion["factor_id"])
+        factor_names[factor_id] = str(criterion["factor"])
+        expected_by_factor.setdefault(factor_id, []).extend(
+            {"point_id": str(point["point_id"]), "title": str(point["title"])}
+            for point in criterion["points"]
+        )
+
+    if not expected_by_factor:
+        return
+    if not isinstance(chapters, list):
+        raise ValueError("标书框架缺少已确认的评分因素章节")
+
+    chapter_by_factor: dict[str, tuple[int, dict[str, Any]]] = {}
+    point_locations: dict[str, tuple[str, int, dict[str, Any]]] = {}
+    for chapter_index, chapter in enumerate(chapters):
+        if not isinstance(chapter, dict):
+            continue
+        factor_id = str(chapter.get("score_factor_id", "")).strip()
+        children = chapter.get("children", [])
+        if not isinstance(children, list):
+            children = []
+        if factor_id:
+            if factor_id not in expected_by_factor:
+                raise ValueError("框架引用了未纳入本次范围的评分因素")
+            if factor_id in chapter_by_factor:
+                raise ValueError(f"评分因素“{factor_names[factor_id]}”被拆到了多个一级章节")
+            if str(chapter.get("title", "")).strip() != factor_names[factor_id]:
+                raise ValueError(f"一级章节标题必须与评分因素一致：“{factor_names[factor_id]}”")
+            chapter_by_factor[factor_id] = (chapter_index, chapter)
+
+        non_score_seen = False
+        for child_index, child in enumerate(children):
+            point_id = str(child.get("score_point_id", "")).strip() if isinstance(child, dict) else ""
+            if point_id:
+                if not factor_id:
+                    raise ValueError("评分点二级标题必须放在对应的评分因素一级章节下")
+                if non_score_seen:
+                    raise ValueError("评分点二级标题必须排在该评分因素章节的其他内容之前")
+                if point_id in point_locations:
+                    raise ValueError("同一个评分点不能重复放入框架")
+                point_locations[point_id] = (factor_id, child_index, child)
+            else:
+                non_score_seen = True
+
+    def validate_score_marker_levels(nodes: Any, expected_level: int) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if node.get("score_factor_id") and expected_level != 1:
+                raise ValueError("评分因素标识只能放在一级章节")
+            if node.get("score_point_id") and expected_level != 2:
+                raise ValueError("评分点标识只能放在二级标题")
+            validate_score_marker_levels(node.get("children", []), expected_level + 1)
+
+    validate_score_marker_levels(chapters, 1)
+
+    factor_positions = [chapter_by_factor[factor_id][0] for factor_id in expected_by_factor if factor_id in chapter_by_factor]
+    if factor_positions != sorted(factor_positions):
+        raise ValueError("评分因素一级章节的顺序必须与已确认的评分表顺序一致")
+
+    expected_point_ids: set[str] = set()
+    for factor_id, expected_points in expected_by_factor.items():
+        mapped = chapter_by_factor.get(factor_id)
+        if not mapped:
+            raise ValueError(f"框架缺少评分因素一级章节：“{factor_names[factor_id]}”")
+        children = mapped[1].get("children", [])
+        if len(children) < len(expected_points):
+            raise ValueError(f"“{factor_names[factor_id]}”下缺少已确认的评分点二级标题")
+        for child_index, point in enumerate(expected_points):
+            child = children[child_index]
+            point_id = str(point["point_id"])
+            expected_point_ids.add(point_id)
+            if not isinstance(child, dict) or str(child.get("score_point_id", "")).strip() != point_id:
+                raise ValueError(f"“{factor_names[factor_id]}”的评分点顺序或二级标题位置不正确")
+            if int(child.get("level", 0)) != 2:
+                raise ValueError(f"“{point['title']}”必须作为二级标题")
+            if str(child.get("title", "")).strip() != point["title"]:
+                raise ValueError(f"评分点二级标题必须与已确认的提取标题一致：“{point['title']}”")
+
+    if set(point_locations) != expected_point_ids:
+        raise ValueError("框架中的评分点与已确认清单不一致，可能有遗漏或重复")
+
+
 def validate_stage2(source: dict[str, Any], stage1_receipt: dict[str, Any]) -> None:
     required = {"schema_version", "stage", "project_id", "stage1_confirmation_sha256", "target_pages", "chapters"}
     missing = sorted(required - source.keys())
@@ -963,6 +1144,9 @@ def validate_stage2(source: dict[str, Any], stage1_receipt: dict[str, Any]) -> N
         raise ValueError("stage2 generation_status is invalid")
     if "tender_position" in source and normalize_tender_position(source.get("tender_position")) != tender_position_from_stage1_receipt(stage1_receipt):
         raise ValueError("stage2 tender position does not match stage1")
+    extraction = stage1_receipt.get("data", {}).get("scoring_extraction")
+    if extraction is not None and source.get("generation_status") != "generating":
+        validate_scorepoint_outline(source["chapters"], extraction)
 
 
 def validate_outline(chapters: Any, target_pages: int, coverage: Any = None, tender_position: str = "main") -> int:
@@ -1004,9 +1188,8 @@ def validate_outline(chapters: Any, target_pages: int, coverage: Any = None, ten
         total += pages
     if total < target_pages:
         raise ValueError(f"planned pages {total} are below the confirmed target {target_pages}")
-    # Scoring coverage is retained as optional metadata when present, but it
-    # is not a Stage2 confirmation gate. A missing or partial AI coverage
-    # object must not block the outline, page-budget, and handoff workflow.
+    # Aggregate coverage is optional; the point-by-point mapping is enforced
+    # separately by validate_scorepoint_outline when Stage 1 has a rubric.
     return total
 
 
@@ -2018,6 +2201,7 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
                 raise ValueError("project name is required")
             if not isinstance(formatting, dict):
                 raise ValueError("formatting is required")
+            validate_scoring_extraction(editable.get("scoring_extraction"))
             intake_bound = intake_receipt_valid(self.server.data_dir)
             tender_position = normalize_tender_position(
                 intake_bound[1].get("tender_position") if intake_bound else source.get("tender_position")
@@ -2298,6 +2482,10 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
                 target,
                 data.get("coverage"),
                 tender_position_from_stage1_receipt(stage1_receipt),
+            )
+            validate_scorepoint_outline(
+                data.get("chapters"),
+                stage1_receipt.get("data", {}).get("scoring_extraction"),
             )
             if not isinstance(data.get("coverage"), dict):
                 data["coverage"] = {}
@@ -2710,7 +2898,7 @@ def wait_prerequisite_valid(data_dir: Path, stage: str) -> bool:
 
 STAGE_WAIT_RULES = {
     "intake": "入口回执后读取资料并生成完整项目口径；不得跳过阶段1。",
-    "stage1": "按已确认项目口径生成完整框架；不得自行改变用户确认值。",
+    "stage1": "读取用户确认的必需二级标题与项目口径，逐项生成并校验标书框架；不得遗漏、改名或重排。",
     "stage2": "按已确认项目口径生成完整标书框架；收到整体调整请求时先处理请求，不得开始图片规划或正文生产。",
     "stage3": "按已确认标书框架生成完整图片规划；收到整体调整请求时先处理请求，不得开始正文生产。",
     "stage4": "仅在最终授权后初始化生产审校台；逐批确认并保持前台等待。",

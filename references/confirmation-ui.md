@@ -61,6 +61,7 @@ AI在`<project_dir>/bid_confirm_ui/stage1-recommendations.json`写入推荐数�
 - `materials`：分开的`background_paths`、`reference_paths`及各自使用规则；不得把两类路径重新合并后交给正文生产；
 - `project`：项目名称、客户、服务对象、概括、范围、区域、期限、目标、关键数量、术语、投标主体；
 - `scoring`：评分范围、评分摘要、证明材料边界；
+- `scoring_extraction`：阶段1评分表核对数据，包含`schema_version: 1`、`status`、本轮范围内的`source_criterion_count`、原始`source_total_criterion_count`、`omitted_categories`、`no_rubric_reason`、`reviewed`和按原表顺序排列的`criteria`。默认商务分类不进入`criteria`；`omitted_categories`记录被移除类别、标准数、分值和原因。每条保留标准保存`criterion_id`、`factor_id`、`factor`、完整`requirement_text`、`scoring_rule`、`weight`、`in_scope`、`exclusion_reason`和`points`。`points`只保存必须优先出现的最少二级标题；每个标题包含唯一`point_id`、标题、顺序和`source_quotes`。原文引用使用`field`（`factor`、`requirement_text`或`scoring_rule`）与精确`text`。
 - `formatting`：Word字体、字号、标题、正文、列表、表格、标题层级和目标页数；
 - `boundaries`：确定事实、待确认事项、不可写事项；
 - `additional_notes`：用户选填注意事项的初始值。
@@ -76,6 +77,8 @@ AI在`<project_dir>/bid_confirm_ui/stage1-recommendations.json`写入推荐数�
 
 阶段1不展示资料选择、路径增删或重新分析入口。AI每次读取回执时重新计算推荐文件摘要；摘要不一致则视为推荐内容已经变化，旧回执失效，必须重新确认。
 
+阶段1评分确认页保留本轮范围内每条标准的完整原文、因素和分值，并只对标题依据进行标色；分值、阈值、证明材料与评分档次不因此成为标题。商务分类默认不显示、不提取；如用户明确要求纳入，再添加到本轮评分清单。界面总数与`source_criterion_count`按本轮实际显示清单校验，并在项目口径摘要中说明原表总数与被移除范围。其他用户逐项排除的标准仍留在表中并写明原因。确认接口校验清单数量、唯一编号、引文匹配、标题顺序、排除原因和用户勾选的`reviewed`。没有评分表时只能通过明确的`status: no_rubric`说明和用户确认继续。
+
 ## 阶段2数据交换
 
 AI必须在有效阶段1回执基础上生成`<project_dir>/bid_confirm_ui/stage2-recommendations.json`。阶段2数据包含：
@@ -84,15 +87,15 @@ AI必须在有效阶段1回执基础上生成`<project_dir>/bid_confirm_ui/stage
 - `stage1_confirmation_sha256`：绑定当前项目口径回执；
 - `target_pages`和`planned_pages`；
 - `coverage`：评分点总数、已映射数和待映射项；
-- `chapters`：完整一级至三级标题树。每个节点包含稳定`id`、`title`、`level`、`order`、`pages`、`score_refs`、`requirement_refs`、`allow_deeper`和`children`。
+- `chapters`：完整一级至三级标题树。每个节点包含稳定`id`、`title`、`level`、`order`、`pages`、`score_refs`、`requirement_refs`和`children`；旧数据中的`allow_deeper`仅为兼容字段，不作为限制。纳入范围的一级评分因素必须写入`score_factor_id`；其下每个已确认的必需标题必须作为标题完全一致的二级节点，并写入`score_point_id`。评分表或需求书对该标题包含具体对象、职责、步骤、交付物、数量或质量要求时，Stage2应在对应标题下建立实质性的三级标题。
 
-网页允许修改标题、增删节点、同级排序、修改页数和是否允许AI继续细分四至六级。网页只展示至三级，但后续正文可以在得到授权的节点下自然继续细化。页面另有“AI整体调整”输入，可提交对当前目录的整体修改要求；提交后由当前AI重新生成阶段2推荐，网页不会直接调用模型。
+网页允许修改普通标题、增删节点、同级排序和修改页数；不设置逐个三级标题的“允许/不允许下钻”选项。已确认的评分因素与必需二级标题、顺序不可在阶段2直接改动；需要修改时先返回阶段1调整并重新确认。Stage2必须在评分表或需求书存在细分内容时，为必需二级标题补充有实际内容的三级标题；全部必需标题之后，也可新增合理的二级标题（如选拔、支撑或管理内容），再继续展开其下级标题。网页只展示至三级；后续正文可根据实际内容，在任何已确认的三级标题下自然细化到四至六级，不强制每个三级标题都继续拆分。页面另有“AI整体调整”输入，可提交对当前目录的整体修改要求；提交后由当前AI重新生成阶段2推荐，网页不会直接调用模型。
 
 阶段2编辑页另有“重新调整”入口：用户可拖动一级章节之间的节点，在总页数不变且每章至少1页的条件下重新分配章节预算。确认后写入`stage2-rebalance-request.json`并让当前AI重新生成阶段2推荐；AI必须读取请求中的`chapter_pages`和`request_id`，重新分配对应章节下的二、三级标题，并在新推荐中写入匹配的`rebalance_request_id`、当前阶段1回执哈希和`generation_status: complete`。请求完成前页面保持加载，不得沿用旧推荐或进入阶段3。
 
-“AI整体调整”提交后写入`stage2-ai-adjust-request.json`，包含当前阶段2推荐哈希、用户`instruction`和页面当前`current_data`。请求绑定当前阶段1确认回执；当前AI读取后必须重新生成完整目录和篇幅，评分映射如有则一并保留，不能只改局部标题，也不能把参考资料当作项目事实。新推荐必须保留阶段1回执哈希、写入匹配的`ai_adjust_request_id`并完成结构校验。用户再次确认后，阶段2回执中的章节和篇幅预算成为最新权威口径；已有评分覆盖数据随回执保留，但不再作为确认台展示指标或页面放行条件；阶段1项目事实本身不被改写。
+“AI整体调整”提交后写入`stage2-ai-adjust-request.json`，包含当前阶段2推荐哈希、用户`instruction`和页面当前`current_data`。请求绑定当前阶段1确认回执；当前AI读取后必须重新生成完整目录和篇幅，并保留所有已确认评分因素和评分点的唯一对应、标题、二级层级、顺序及置顶位置。不能只改局部标题，也不能把参考资料当作项目事实。新推荐必须保留阶段1回执哈希、写入匹配的`ai_adjust_request_id`并完成结构校验。用户再次确认后，阶段2回执中的章节和篇幅预算成为最新权威口径；阶段1项目事实本身不被改写。
 
-提交后写入`stage2-confirmation.json`。回执同时绑定阶段2推荐摘要和阶段1确认摘要；任一上游发生变化，回执即失效。提交必须满足：一级标题非空、层级不超过三级、同级顺序唯一、页数为非负整数、总计划页数不低于阶段1确认目标。评分覆盖数据为可选元数据，存在时随回执保存，但不在确认台显示为指标，也不作为页面放行条件。阶段2目标页数必须等于阶段1的用户确认值。
+提交后写入`stage2-confirmation.json`。回执同时绑定阶段2推荐摘要和阶段1确认摘要；任一上游发生变化，回执即失效。提交必须满足：一级标题非空、层级不超过三级、同级顺序唯一、页数为非负整数、总计划页数不低于阶段1确认目标。存在已纳入范围的评分点时，必须校验每个点且仅出现一次、标题一致、处于对应因素下的二级标题、按用户确认顺序排列并先于支撑内容；否则阻止提交。若阶段1明确确认无评分表，才可跳过该项校验。`coverage`可作为辅助摘要，但不能代替逐项评分点标识。阶段2目标页数必须等于阶段1的用户确认值。
 
 ## 推荐完成与页面放行
 

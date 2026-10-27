@@ -58,7 +58,6 @@ def extract(docx: Path):
             "pages": 0,
             "score_refs": [],
             "requirement_refs": [],
-            "allow_deeper": level == 3,
             "children": [],
         }
         while len(stack) >= level:

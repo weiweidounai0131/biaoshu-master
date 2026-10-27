@@ -77,9 +77,17 @@ class WorkflowGateTest(unittest.TestCase):
             "source_summary": {"file_count": 0, "description": "已完成"},
             "project": {"project_name": "测试陪标", "summary": "完整项目口径", "bidder_name": "我司"},
             "scoring": {},
+            "scoring_extraction": {
+                "schema_version": 1,
+                "status": "no_rubric",
+                "source_criterion_count": 0,
+                "no_rubric_reason": "该单元测试没有评分表输入",
+                "reviewed": True,
+                "criteria": [],
+            },
             "formatting": {"target_pages": 100},
             "boundaries": {},
-            "additional_notes": "评分表的商务部分不用写\n内容不要精准，选择2~3个不重要的评分点不写",
+            "additional_notes": "术语应保持一致",
         }
 
     def request(self, path: str, data: dict | None = None) -> tuple[int, dict]:
@@ -268,8 +276,9 @@ class WorkflowGateTest(unittest.TestCase):
         skeleton = bid_server.read_json(self.data_dir / bid_server.STAGE1_INPUT)
         self.assertEqual(skeleton["generation_status"], "generating")
         self.assertEqual(skeleton["formatting"]["target_pages"], 100)
-        self.assertIn("评分表的商务部分不用写", skeleton["additional_notes"])
-        self.assertIn("内容不要精准，选择2~3个不重要的评分点不写", skeleton["additional_notes"])
+        self.assertEqual(skeleton["additional_notes"], "")
+        self.assertEqual(skeleton["scoring_extraction"]["status"], "pending")
+        self.assertFalse(skeleton["scoring_extraction"]["reviewed"])
 
         stage1 = self._stage1("complete")
         bid_server.atomic_write_json(self.data_dir / bid_server.STAGE1_INPUT, stage1)
@@ -299,6 +308,21 @@ class WorkflowGateTest(unittest.TestCase):
             "chapters": [{"id": "c1", "title": "章节", "level": 1, "order": 1, "pages": 999, "children": []}],
             "tender_position": "companion",
         }, confirmed["receipt"])
+
+    def test_stage1_confirmation_requires_user_reviewed_score_extraction(self) -> None:
+        stage1 = self._stage1("complete")
+        stage1["scoring_extraction"]["reviewed"] = False
+        bid_server.atomic_write_json(self.data_dir / bid_server.STAGE1_INPUT, stage1)
+        status, loaded = self.request("/api/stage1")
+        self.assertEqual(status, 200)
+        editable = deepcopy(stage1)
+        status, payload = self.request("/api/stage1/confirm", {
+            "source_sha256": loaded["source_sha256"],
+            "data": editable,
+        })
+        self.assertEqual(status, 422)
+        self.assertIn("勾选", payload["error"])
+        self.assertFalse((self.data_dir / bid_server.STAGE1_RECEIPT).exists())
 
     def test_optional_scoring_coverage_does_not_block_outline(self) -> None:
         chapter = {"id": "c1", "title": "章节", "level": 1, "order": 1, "pages": 100, "children": []}
