@@ -148,6 +148,7 @@ class DeliveryHandler(SimpleHTTPRequestHandler):
                     "active_batch_id": manifest["active_batch_id"],
                     "word_batch_count": manifest["word_batch_count"],
                     "batch_statuses": [{"id": item["id"], "order": item["order"], "status": item["status"]} for item in manifest["word_batches"]],
+                    "production_control": manifest.get("production_control", {"state": "running", "updated_at": manifest["updated_at"], "reason": ""}),
                     "pending_request_count": manifest["pending_request_count"],
                     "last_event_id": manifest["last_event_id"],
                 })
@@ -360,10 +361,13 @@ def launch_daemon(project_dir: Path, requested_port: int | None, no_browser: boo
     project_dir = canonical_project_dir(project_dir)
     existing = load_lock(project_dir)
     if existing:
-        url = f"http://{HOST}:{int(existing['port'])}"
-        # Preserve the existing production/review tab when an agent reattaches.
-        print(url)
-        return 0
+        port = int(existing["port"])
+        data = health(port)
+        if data and data.get("service") == "biaoshu-master-delivery-ui" and data.get("project") == str(project_dir):
+            # Preserve the existing production/review tab when an agent reattaches.
+            print(f"http://{HOST}:{port}")
+            return 0
+        lock_path(project_dir).unlink(missing_ok=True)
     port = requested_port if requested_port is not None else find_port(DEFAULT_PORT)
     # The daemon parent is the sole browser opener; the child must only serve.
     command = [sys.executable, str(Path(__file__).resolve()), str(project_dir), "--serve", "--port", str(port), "--no-browser"]
@@ -406,6 +410,37 @@ def launch_daemon(project_dir: Path, requested_port: int | None, no_browser: boo
             pass
     print(f"Delivery-review service failed to start; see {log_path}", file=sys.stderr)
     return 3
+
+
+def resume_service(project_dir: Path, requested_port: int | None, open_browser: bool) -> int:
+    """Reattach to the durable review service or restart it from saved state."""
+    project_dir = canonical_project_dir(project_dir)
+    protocol.load_manifest(project_dir)
+    lock = load_lock(project_dir)
+    recovered = False
+    if lock:
+        port = int(lock["port"])
+        data = health(port)
+        if not data or data.get("service") != "biaoshu-master-delivery-ui" or data.get("project") != str(project_dir):
+            lock_path(project_dir).unlink(missing_ok=True)
+            lock = None
+    if lock is None:
+        if launch_daemon(project_dir, requested_port, no_browser=True) != 0:
+            return 3
+        lock = load_lock(project_dir)
+        if not lock:
+            print("Delivery-review service did not publish a reusable port", file=sys.stderr)
+            return 3
+        recovered = True
+    url = f"http://{HOST}:{int(lock['port'])}"
+    browser_opened: bool | None = None
+    if open_browser or recovered:
+        try:
+            browser_opened = bool(webbrowser.open(url, new=0, autoraise=True))
+        except Exception as exc:
+            print(f"Browser could not be opened: {exc}", file=sys.stderr)
+    print(f"{url} [service_recovered={'true' if recovered else 'false'} browser_opened={'true' if browser_opened else 'false' if browser_opened is False else 'not_attempted'}]")
+    return 0
 
 
 def wait_for_event(project_dir: Path, event_type: str, timeout: int, after_event_id: int) -> int:
@@ -453,6 +488,11 @@ def main() -> int:
     parser.add_argument("--daemon", action="store_true")
     parser.add_argument("--serve", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--wait-only", action="store_true")
+    parser.add_argument("--control-status", action="store_true", help="print persisted production pause/resume state")
+    parser.add_argument("--set-production-control", choices=["paused", "running"], help="AI-only: persist production pause/resume state")
+    parser.add_argument("--control-reason", default="", help="optional reason recorded with AI production control")
+    parser.add_argument("--resume", action="store_true", help="reattach to or restart the saved production review service")
+    parser.add_argument("--open-browser", action="store_true", help="open the existing or recovered review page")
     parser.add_argument("--wait-event", choices=sorted(protocol.EVENT_TYPES | {"user-action"}), default="revision")
     parser.add_argument("--after-event-id", type=int, default=0)
     parser.add_argument("--wait-timeout", type=int, default=0, help="Seconds to wait; 0 waits indefinitely (default)")
@@ -462,9 +502,11 @@ def main() -> int:
     args = parser.parse_args()
     project_dir = args.project_dir.expanduser().resolve()
     project_dir.mkdir(parents=True, exist_ok=True)
-    actions = sum(bool(value) for value in (args.init, args.daemon, args.serve, args.wait_only, args.shutdown))
+    actions = sum(bool(value) for value in (args.init, args.daemon, args.serve, args.wait_only, args.shutdown, args.control_status, args.set_production_control, args.resume))
     if actions != 1:
-        parser.error("choose exactly one of --init, --daemon, --wait-only, or --shutdown")
+        parser.error("choose exactly one action")
+    if args.open_browser and not args.resume:
+        parser.error("--open-browser is only available with --resume")
     if args.init:
         manifest, created = protocol.initialize_delivery(project_dir)
         print(json.dumps({
@@ -482,6 +524,19 @@ def main() -> int:
         return shutdown(project_dir)
     if args.wait_only:
         return wait_for_event(project_dir, args.wait_event, args.wait_timeout, args.after_event_id)
+    if args.control_status:
+        manifest = protocol.load_manifest(project_dir)
+        print(json.dumps(manifest.get("production_control", {"state": "running", "updated_at": manifest["updated_at"], "reason": ""}), ensure_ascii=False))
+        return 0
+    if args.set_production_control:
+        status = resume_service(project_dir, args.port, open_browser=False)
+        if status != 0:
+            return status
+        manifest, event = protocol.set_production_control(project_dir, args.set_production_control, args.control_reason)
+        print(json.dumps({"production_control": manifest.get("production_control"), "event": event}, ensure_ascii=False))
+        return 0
+    if args.resume:
+        return resume_service(project_dir, args.port, args.open_browser)
     if args.daemon:
         protocol.load_manifest(project_dir)
         return launch_daemon(project_dir, args.port, args.no_browser)

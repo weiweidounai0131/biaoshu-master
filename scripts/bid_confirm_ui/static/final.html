@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>最终交付确认 · 标书确认台</title>
-  <link rel="stylesheet" href="/final.css?v=5">
-  <link rel="stylesheet" href="/workflow-shared.css?v=2">
+  <link rel="stylesheet" href="/final.css?v=6">
+  <link rel="stylesheet" href="/workflow-shared.css?v=4">
 </head>
 <body data-page-stage="stage4">
   <div class="app-shell">
@@ -39,7 +39,7 @@
       <section class="delivery-board">
         <article class="delivery-card word-card">
           <div class="delivery-head"><div><span>交付物 A</span><h2>Word技术服务标书</h2><p>选择生成批次，最终Word文件数量必须与这里一致。</p></div><div class="format-chip">.DOCX</div></div>
-          <div class="batch-selector"><strong>分几次生成？</strong><small>最少1次，最多5次</small><div class="batch-options" id="batch-options"></div></div>
+          <div class="batch-selector"><strong>分几次生成？</strong><small>按确认目录中的二、三级标题切分，最多5次</small><div class="batch-options" id="batch-options"></div></div>
           <div class="rule-selector">
             <div class="rule-selector-head"><div><strong>生成规则</strong><small>默认使用通用政企标书规则，也可选择领域规则覆盖层。</small></div><span class="rule-badge">Stage4</span></div>
             <select id="generation-rule" aria-label="选择标书生成规则"></select>
@@ -73,12 +73,13 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <div class="modal" id="subagent-modal" hidden><div class="modal-card subagent-modal-card" role="dialog" aria-modal="true" aria-labelledby="subagent-title"><div class="rule-modal-mark">AI</div><h2 id="subagent-title">检测到你的 Agent 支持子代理，是否要开启？</h2><p>这里只在本次生产中生效。选择子代理后，主 AI 仍会统一复核所有批次。</p><div class="subagent-choices"><label><input type="radio" name="subagent-mode" value="ai_arranged"><span><strong>开启，由 AI 安排子代理</strong><small>AI按批次和任务安排分工</small></span></label><label><input type="radio" name="subagent-mode" value="user_arranged"><span><strong>开启，子代理由我自行安排</strong><small>你填写希望使用的子代理和分工</small></span></label><label><input type="radio" name="subagent-mode" value="single_agent"><span><strong>不开启，由一个 AI 完成</strong><small>按顺序完成全部批次</small></span></label></div><div id="subagent-instructions" hidden><label class="subagent-assignment-label" for="subagent-assignment">填写子代理安排</label><textarea id="subagent-assignment" rows="4" maxlength="4000" placeholder="例如：安排两个子代理，分别负责第1、2批；每个代理只写指定批次并返回结果。"></textarea></div><div class="modal-actions"><button id="cancel-subagent">返回</button><button class="danger-confirm" id="confirm-subagent">确认并开始</button></div></div></div>
   <div class="modal" id="reopen-modal" hidden><div class="modal-card"><div class="warning-mark">!</div><h2>修改最终交付方案？</h2><p>确认后只重新开启本页。项目口径、标书框架和图片规划保持不变；此前最终授权回执将归档。</p><div class="modal-actions"><button id="cancel-reopen">取消</button><button class="danger-confirm" id="confirm-reopen">确认修改</button></div></div></div>
   <div class="modal" id="rule-create-modal" hidden><div class="modal-card rule-modal-card"><div class="rule-modal-mark">R</div><h2>新建专属生成规则</h2><p>请在当前对话中输出下面这句话，Skill 会切换到“专属规则制作”流程，不会开始标书生成。</p><textarea id="custom-rule-prompt" rows="3" readonly>请用biaoshu-master技能，帮我制作专属的标书生成规则</textarea><div class="modal-actions"><button id="close-rule-modal">关闭</button><button class="danger-confirm" id="copy-rule-prompt">复制这句话</button></div></div></div>
   <div class="modal" id="success-modal" hidden><div class="modal-card success-card"><div class="check">✓</div><h2>最终方案已授权</h2><p id="success-copy">交付物数量和边界已经锁定。</p><div class="next-status" id="production-status"><span class="spinner"></span>AI处理中，若对话已结束请回复“接续”让对话继续</div><button id="close-success">留在当前页面检查</button></div></div>
-  <script src="/workflow-shared.js?v=2"></script>
-  <script src="/workflow-nav.js?v=3"></script>
+  <script src="/workflow-shared.js?v=3"></script>
+  <script src="/workflow-nav.js?v=5"></script>
   <script src="/notifications.js?v=1"></script>
-  <script src="/final.js?v=13"></script>
+  <script src="/final.js?v=14"></script>
 </body>
 </html>

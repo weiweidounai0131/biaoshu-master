@@ -110,7 +110,10 @@ function scoringExtractionIssues() {
     const criterion = criteria[ci] || {};
     if (!String(criterion.criterion_id || "").trim() || !String(criterion.factor_id || "").trim() || !String(criterion.factor || "").trim()) return [`第 ${ci + 1} 条缺少评分因素或标准编号`];
     if (!String(criterion.requirement_text || "").trim() && !String(criterion.scoring_rule || "").trim()) return [`第 ${ci + 1} 条评分标准原文为空`];
-    if (criterion.in_scope === false && !String(criterion.exclusion_reason || "").trim()) return [`第 ${ci + 1} 条未纳入框架，请写明原因`];
+    if (criterion.in_scope === false) {
+      if (!String(criterion.exclusion_reason || "").trim()) return [`第 ${ci + 1} 条未纳入框架，请写明原因`];
+      continue;
+    }
     const points = Array.isArray(criterion.points) ? criterion.points : [];
     if (!points.length) return [`第 ${ci + 1} 条还没有提取必须优先出现的二级标题`];
     for (let pi = 0; pi < points.length; pi += 1) {
@@ -134,7 +137,7 @@ function scoringExtractionIssues() {
 function updateScoringReviewState() {
   const extraction = state.scoringExtraction || {};
   const criteria = Array.isArray(extraction.criteria) ? extraction.criteria : [];
-  const points = criteria.flatMap((criterion) => Array.isArray(criterion.points) ? criterion.points : []);
+  const points = criteria.filter((criterion) => criterion.in_scope !== false).flatMap((criterion) => Array.isArray(criterion.points) ? criterion.points : []);
   const included = criteria.filter((criterion) => criterion.in_scope !== false).reduce((count, criterion) => count + (Array.isArray(criterion.points) ? criterion.points.length : 0), 0);
   const omitted = Array.isArray(extraction.omitted_categories) ? extraction.omitted_categories : [];
   $("#scoring-review-counts").textContent = extraction.status === "no_rubric"
@@ -207,6 +210,12 @@ function renderScoringExtraction() {
       weight.className = "score-weight";
       weight.textContent = `权重：${criterion.weight}`;
       factorCell.append(weight);
+    }
+    if (String(criterion.source_location || "").trim()) {
+      const location = document.createElement("small");
+      location.className = "score-source-location";
+      location.textContent = String(criterion.source_location).trim();
+      factorCell.append(location);
     }
     const scopeLabel = document.createElement("label");
     scopeLabel.className = "score-scope-toggle";
@@ -341,7 +350,7 @@ function renderScoringExtraction() {
     addPoint.textContent = "＋ 添加必需标题";
     addPoint.dataset.scoreAction = "add-point";
     addPoint.dataset.ci = String(ci);
-    addPoint.disabled = state.readOnly;
+    addPoint.disabled = state.readOnly || criterion.in_scope === false;
     pointsCell.append(addPoint);
     row.append(pointsCell);
     tbody.append(row);

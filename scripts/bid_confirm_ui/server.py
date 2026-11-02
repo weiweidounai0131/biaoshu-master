@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import signal
 import shutil
 import socket
@@ -82,6 +83,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 import rule_profiles
+from bid_confirm_ui import stage4_batches
 
 
 def canonical_json(data: Any) -> bytes:
@@ -992,8 +994,10 @@ def validate_scoring_extraction(extraction: Any, require_review: bool = True) ->
             raise ValueError(f"第 {criterion_index} 条评分标准原文为空")
         if not isinstance(criterion.get("in_scope"), bool):
             raise ValueError(f"第 {criterion_index} 条评分标准的纳入范围状态无效")
-        if not criterion["in_scope"] and not str(criterion.get("exclusion_reason", "")).strip():
-            raise ValueError(f"第 {criterion_index} 条评分标准未纳入框架，请填写原因")
+        if not criterion["in_scope"]:
+            if not str(criterion.get("exclusion_reason", "")).strip():
+                raise ValueError(f"第 {criterion_index} 条评分标准未纳入框架，请填写原因")
+            continue
         points = criterion.get("points")
         if not isinstance(points, list) or not points:
             raise ValueError(f"第 {criterion_index} 条评分标准没有提取出必需二级标题")
@@ -1660,11 +1664,43 @@ def confirmed_stage2_chapters(data_dir: Path) -> list[dict[str, Any]]:
     return chapters
 
 
-def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_count: int) -> None:
+def validate_subagent_execution(data: dict[str, Any], capabilities: Any) -> None:
+    execution = data.get("subagent_execution")
+    if execution is None:
+        return
+    if not isinstance(execution, dict) or set(execution) != {"mode", "instructions", "max_parallel"}:
+        raise ValueError("子代理安排字段无效")
+    mode = execution.get("mode")
+    instructions = execution.get("instructions")
+    max_parallel = execution.get("max_parallel")
+    if mode not in {"ai_arranged", "user_arranged", "single_agent"}:
+        raise ValueError("子代理安排方式无效")
+    if not isinstance(instructions, str) or len(instructions) > 4000:
+        raise ValueError("子代理分工说明必须是4000字以内的文本")
+    if isinstance(max_parallel, bool) or not isinstance(max_parallel, int) or not 1 <= max_parallel <= 5:
+        raise ValueError("子代理并发数无效")
+    if mode == "single_agent":
+        if instructions.strip() or max_parallel != 1:
+            raise ValueError("单AI生产方式不能包含子代理安排")
+        return
+    if not isinstance(capabilities, dict) or capabilities.get("subagents_available") is not True:
+        raise ValueError("当前宿主没有登记可用的子代理能力")
+    capacity = capabilities.get("max_parallel")
+    if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 2:
+        raise ValueError("当前宿主没有有效的子代理并发上限")
+    if max_parallel > capacity:
+        raise ValueError("子代理并发数超过当前宿主能力上限")
+    if mode == "user_arranged" and not instructions.strip():
+        raise ValueError("请填写希望使用的子代理和分工")
+    if mode == "ai_arranged" and instructions.strip():
+        raise ValueError("AI安排子代理时不应包含用户分工文本")
+
+
+def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_count: int, images: list[dict[str, Any]] | None = None, subagent_capabilities: Any = None) -> None:
     if not isinstance(data, dict):
         raise ValueError("stage4 data must be an object")
     required = {"word_batch_count", "word_batches", "image_plan_workbook", "skill_boundary", "additional_notes"}
-    allowed = required | {"delivery_output_dir", "generation_rule"}
+    allowed = required | {"delivery_output_dir", "generation_rule", "subagent_execution"}
     if not required.issubset(data) or not set(data).issubset(allowed):
         raise ValueError("stage4 data fields are incomplete or unsupported")
     batch_count = data.get("word_batch_count")
@@ -1677,41 +1713,52 @@ def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_coun
     expected_ids = [str(chapter.get("id", "")).strip() for chapter in chapters]
     if any(not chapter_id for chapter_id in expected_ids):
         raise ValueError("标书框架包含无效章节ID")
-    seen_chapters: list[str] = []
     seen_files: set[str] = set()
-    for index, batch in enumerate(batches, 1):
-        if not isinstance(batch, dict):
-            raise ValueError("Word批次明细必须是对象")
-        fields = {"id", "order", "chapter_ids", "chapter_numbers", "chapter_titles", "planned_pages", "output_filename"}
-        if set(batch) != fields:
-            raise ValueError("Word批次明细包含缺失或不支持的字段")
-        if batch.get("order") != index or str(batch.get("id", "")).strip() != f"word-batch-{index}":
-            raise ValueError("Word批次顺序必须从1连续编号")
-        ids = batch.get("chapter_ids")
-        numbers = batch.get("chapter_numbers")
-        titles = batch.get("chapter_titles")
-        if not isinstance(ids, list) or not ids or not isinstance(numbers, list) or not isinstance(titles, list):
-            raise ValueError("每个Word批次必须包含至少一个一级章节")
-        if len(ids) != len(numbers) or len(ids) != len(titles):
-            raise ValueError("Word批次的章节ID、编号和标题数量不一致")
-        for position, chapter_id in enumerate(ids):
-            chapter_id = str(chapter_id).strip()
-            chapter = chapter_map.get(chapter_id)
-            if not chapter:
-                raise ValueError("Word批次引用了未知章节")
-            if str(numbers[position]).strip() != str(chapter.get("number", "")).strip() or str(titles[position]).strip() != str(chapter.get("title", "")).strip():
-                raise ValueError("Word批次章节编号或标题已过期")
-            seen_chapters.append(chapter_id)
-        planned_pages = batch.get("planned_pages")
-        expected_pages = sum(int(chapter_map[str(chapter_id).strip()].get("pages", 0) or 0) for chapter_id in ids)
-        if isinstance(planned_pages, bool) or not isinstance(planned_pages, int) or planned_pages != expected_pages:
-            raise ValueError("Word批次预计页数与所含章节不一致")
-        filename = str(batch.get("output_filename", "")).strip()
-        if not filename.lower().endswith(".docx") or filename in seen_files:
-            raise ValueError("Word批次文件名必须唯一且以.docx结尾")
-        seen_files.add(filename)
-    if seen_chapters != expected_ids:
-        raise ValueError("Word批次必须按原顺序完整覆盖全部一级章节，且不得重复")
+    fields_legacy = {"id", "order", "chapter_ids", "chapter_numbers", "chapter_titles", "planned_pages", "output_filename"}
+    fields_segmented = fields_legacy | {"segments", "image_ids"}
+    batch_shapes = {frozenset(batch) for batch in batches if isinstance(batch, dict)}
+    if len(batch_shapes) != 1:
+        raise ValueError("Word批次不能混用旧的整章分组与新的目录分段格式")
+    shape = next(iter(batch_shapes), frozenset())
+    if shape == frozenset(fields_segmented):
+        expected_image_ids = None
+        if images is not None:
+            expected_image_ids = [str(image.get("id", "")).strip() for image in images]
+            if any(not image_id for image_id in expected_image_ids):
+                raise ValueError("已确认图片缺少稳定ID")
+        stage4_batches.validate_batch_plan(batches, chapters, expected_image_ids)
+        if sum(len(batch["image_ids"]) for batch in batches) != image_count:
+            raise ValueError("Word批次圖片分配數量與圖片規劃不一致")
+    elif shape == frozenset(fields_legacy):
+        seen_chapters: list[str] = []
+        for index, batch in enumerate(batches, 1):
+            if not isinstance(batch, dict):
+                raise ValueError("Word批次明细必须是对象")
+            if batch.get("order") != index or str(batch.get("id", "")).strip() != f"word-batch-{index}":
+                raise ValueError("Word批次顺序必须从1连续编号")
+            ids = batch.get("chapter_ids")
+            numbers = batch.get("chapter_numbers")
+            titles = batch.get("chapter_titles")
+            if not isinstance(ids, list) or not ids or not isinstance(numbers, list) or not isinstance(titles, list) or len(ids) != len(numbers) or len(ids) != len(titles):
+                raise ValueError("每个Word批次必须包含有效的一级章节范围")
+            for position, chapter_id in enumerate(ids):
+                chapter_id = str(chapter_id).strip()
+                chapter = chapter_map.get(chapter_id)
+                if not chapter or str(numbers[position]).strip() != str(chapter.get("number", "")).strip() or str(titles[position]).strip() != str(chapter.get("title", "")).strip():
+                    raise ValueError("Word批次章节编号或标题已过期")
+                seen_chapters.append(chapter_id)
+            planned_pages = batch.get("planned_pages")
+            expected_pages = sum(int(chapter_map[str(chapter_id).strip()].get("pages", 0) or 0) for chapter_id in ids)
+            if isinstance(planned_pages, bool) or not isinstance(planned_pages, int) or planned_pages != expected_pages:
+                raise ValueError("Word批次预计页数与所含章节不一致")
+            filename = str(batch.get("output_filename", "")).strip()
+            if not filename.lower().endswith(".docx") or filename in seen_files:
+                raise ValueError("Word批次文件名必须唯一且以.docx结尾")
+            seen_files.add(filename)
+        if seen_chapters != expected_ids:
+            raise ValueError("旧版Word批次必须按原顺序完整覆盖全部一级章节，且不得重复")
+    else:
+        raise ValueError("Word批次字段格式无效")
 
     workbook = data.get("image_plan_workbook")
     if not isinstance(workbook, dict):
@@ -1747,6 +1794,11 @@ def validate_delivery_plan(data: Any, chapters: list[dict[str, Any]], image_coun
         raise ValueError("交付物保存位置必须是文本")
     if "generation_rule" in data:
         rule_profiles.validate_selection(data["generation_rule"])
+    validate_subagent_execution(data, subagent_capabilities)
+    execution = data.get("subagent_execution")
+    if isinstance(execution, dict) and execution.get("mode") != "single_agent":
+        if batch_count < 2 or execution.get("max_parallel", 0) > batch_count:
+            raise ValueError("子代理生产至少需要两个批次，且并发数不能超过批次数")
 
 
 def validate_delivery_output_dir(data: dict[str, Any]) -> str:
@@ -1762,7 +1814,7 @@ def validate_delivery_output_dir(data: dict[str, Any]) -> str:
 
 def validate_stage4(source: dict[str, Any], stage3_receipt: dict[str, Any], chapters: list[dict[str, Any]]) -> None:
     required = {"schema_version", "stage", "project_id", "generated_at", "stage3_confirmation_sha256", "summary", "delivery"}
-    allowed = required | {"generation_status"}
+    allowed = required | {"generation_status", "production_capabilities"}
     if not required.issubset(source) or not set(source).issubset(allowed):
         raise ValueError("stage4 recommendation fields are incomplete or unsupported")
     if source.get("schema_version") != 1 or source.get("stage") != "stage4":
@@ -1785,7 +1837,22 @@ def validate_stage4(source: dict[str, Any], stage3_receipt: dict[str, Any], chap
     for field in ("project_name", "client", "project_overview"):
         if not isinstance(summary.get(field), str):
             raise ValueError(f"stage4 summary {field} must be a string")
-    validate_delivery_plan(source.get("delivery"), chapters, image_count)
+    capabilities = source.get("production_capabilities")
+    if capabilities is not None:
+        if not isinstance(capabilities, dict) or set(capabilities) != {"word_batch_capacity", "subagents"}:
+            raise ValueError("Stage4宿主能力信息无效")
+        capacity = capabilities.get("word_batch_capacity")
+        if isinstance(capacity, bool) or not isinstance(capacity, int) or not 1 <= capacity <= stage4_batches.MAX_BATCH_COUNT:
+            raise ValueError("Stage4可分批次数无效")
+        if capacity != stage4_batches.max_batch_count(chapters):
+            raise ValueError("Stage4可分批次数与当前已确认目录不一致")
+        subagents = capabilities.get("subagents")
+        if not isinstance(subagents, dict) or set(subagents) != {"subagents_available", "max_parallel", "checked_at"} or not isinstance(subagents.get("subagents_available"), bool) or not isinstance(subagents.get("checked_at"), str) or not subagents["checked_at"].strip():
+            raise ValueError("Stage4子代理能力检查信息无效")
+        max_parallel = subagents.get("max_parallel")
+        if isinstance(max_parallel, bool) or not isinstance(max_parallel, int) or (subagents["subagents_available"] and max_parallel < 2) or (not subagents["subagents_available"] and max_parallel != 0):
+            raise ValueError("Stage4子代理并发上限与能力检查不一致")
+    validate_delivery_plan(source.get("delivery"), chapters, image_count, stage3_receipt.get("data", {}).get("images", []), (capabilities or {}).get("subagents"))
 
 
 def stage4_recommendation_valid(data_dir: Path) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]] | None:
@@ -1816,7 +1883,15 @@ def stage4_confirmation_valid(data_dir: Path) -> tuple[dict[str, Any], dict[str,
     if receipt.get("source_sha256") != sha256_data(source) or not confirmation_digest_valid(receipt):
         return None
     try:
-        validate_delivery_plan(receipt.get("data"), chapters, len(stage3_receipt.get("data", {}).get("images", [])))
+        validate_delivery_plan(
+            receipt.get("data"), chapters,
+            len(stage3_receipt.get("data", {}).get("images", [])),
+            stage3_receipt.get("data", {}).get("images", []),
+            (source.get("production_capabilities") or {}).get("subagents"),
+        )
+        capabilities = (source.get("production_capabilities") or {}).get("subagents", {})
+        if capabilities.get("subagents_available") is True and receipt.get("data", {}).get("word_batch_count", 1) > 1 and "subagent_execution" not in receipt.get("data", {}):
+            raise ValueError("多批生产必须保存用户对子代理安排方式的选择")
     except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError):
         return None
     return source, stage3_receipt, receipt
@@ -2036,7 +2111,28 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
                     "draft": draft,
                     "workflow": state,
                     "chapters": chapters,
+                    "word_batch_capacity": stage4_batches.max_batch_count(chapters),
                 })
+            except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+            return
+        batch_plan_match = re.fullmatch(r"/api/stage4/batch-plan\?count=(\d+)", self.path)
+        if batch_plan_match:
+            try:
+                bound = stage4_recommendation_valid(self.server.data_dir)
+                if not bound:
+                    raise ValueError("最终交付方案尚未生成，或上游确认回执已经失效")
+                source, stage3_receipt, chapters = bound
+                count = int(batch_plan_match.group(1))
+                images = stage3_receipt.get("data", {}).get("images", [])
+                batches, capacity = stage4_batches.build_word_batches(
+                    chapters, count, source["summary"]["project_name"], images,
+                )
+                delivery = dict(source["delivery"])
+                delivery["word_batch_count"] = count
+                delivery["word_batches"] = batches
+                validate_delivery_plan(delivery, chapters, len(images), images)
+                self.send_json({"ok": True, "word_batch_count": count, "word_batch_capacity": capacity, "word_batches": batches})
             except (OSError, ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNPROCESSABLE_ENTITY)
             return
@@ -2589,7 +2685,14 @@ class BidConfirmHandler(SimpleHTTPRequestHandler):
             image_count = len(stage3_receipt.get("data", {}).get("images", []))
             if "generation_rule" not in data:
                 data["generation_rule"] = rule_profiles.default_selection()
-            validate_delivery_plan(data, chapters, image_count)
+            validate_delivery_plan(
+                data, chapters, image_count,
+                stage3_receipt.get("data", {}).get("images", []),
+                (source.get("production_capabilities") or {}).get("subagents"),
+            )
+            capabilities = (source.get("production_capabilities") or {}).get("subagents", {})
+            if capabilities.get("subagents_available") is True and data.get("word_batch_count", 1) > 1 and "subagent_execution" not in data:
+                raise ValueError("请先选择是否启用子代理及其安排方式")
             rule_profiles.validate_selection(data["generation_rule"])
             data["delivery_output_dir"] = validate_delivery_output_dir(data)
             receipt = {

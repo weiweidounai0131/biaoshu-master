@@ -70,7 +70,7 @@ WORKBOOK_STATUSES = {"pending", "generating", "ready_for_review", "revision_pend
 # ``direct-edit`` is deliberately not an AI wake-up event.  The local review
 # service re-exports deterministic user changes itself, so a host does not
 # need to spend a model turn merely to mirror a manual replacement.
-EVENT_TYPES = {"revision", "direct-edit", "batch-confirmed", "image-plan-confirmed", "final-confirmed"}
+EVENT_TYPES = {"revision", "direct-edit", "batch-confirmed", "image-plan-confirmed", "final-confirmed", "production-paused", "production-resumed"}
 REQUEST_STATUSES = {"pending", "applying", "applied", "superseded"}
 SOURCE_BLOCK_TYPES = {
     "heading",
@@ -380,6 +380,7 @@ def _batch_manifest_item(batch: dict[str, Any]) -> dict[str, Any]:
         "chapter_ids": copy.deepcopy(batch.get("chapter_ids")),
         "chapter_numbers": copy.deepcopy(batch.get("chapter_numbers")),
         "chapter_titles": copy.deepcopy(batch.get("chapter_titles")),
+        **({"segments": copy.deepcopy(batch["segments"]), "image_ids": copy.deepcopy(batch["image_ids"])} if "segments" in batch and "image_ids" in batch else {}),
         "planned_pages": batch.get("planned_pages"),
         "output_filename": filename,
         "source_path": f"{SOURCE_DIR_NAME}/batch-{order:02d}.json",
@@ -427,6 +428,7 @@ def build_manifest(project_dir: Path) -> dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "status": "preparing",
+        "production_control": {"state": "running", "updated_at": now, "reason": ""},
         "active_batch_id": manifest_batches[0]["id"],
         "word_batch_count": delivery["word_batch_count"],
         "delivery_output_dir": str(delivery.get("delivery_output_dir", "")).strip(),
@@ -452,7 +454,11 @@ def _validate_manifest_batch(batch: Any, index: int) -> None:
         "id", "order", "chapter_ids", "chapter_numbers", "chapter_titles", "planned_pages", "output_filename",
         "source_path", "export_path", "status", "source_sha256", "export_sha256", "review_confirmation_sha256",
     }
-    _require_exact_keys(batch, expected, "Word批次状态")
+    optional = {"segments", "image_ids"}
+    present_optional = optional.intersection(batch)
+    if present_optional and present_optional != optional:
+        raise ValueError("Word批次目录分段和图片分配必须同时存在")
+    _require_exact_keys(batch, expected | present_optional, "Word批次状态")
     if batch.get("order") != index:
         raise ValueError("Word批次状态顺序必须从1连续编号")
     _require_nonempty_string(batch.get("id"), "Word批次ID")
@@ -475,6 +481,11 @@ def _validate_manifest_batch(batch: Any, index: int) -> None:
         raise ValueError("Word批次章节范围长度不一致")
     if isinstance(batch.get("planned_pages"), bool) or not isinstance(batch.get("planned_pages"), int) or batch["planned_pages"] < 0:
         raise ValueError("Word批次计划页数无效")
+    if present_optional:
+        if not isinstance(batch["segments"], list) or not batch["segments"]:
+            raise ValueError("Word批次至少需要一个目录分段")
+        if not isinstance(batch["image_ids"], list) or any(not isinstance(item, str) or not item.strip() for item in batch["image_ids"]) or len(batch["image_ids"]) != len(set(batch["image_ids"])):
+            raise ValueError("Word批次图片分配无效")
 
 
 def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None) -> None:
@@ -483,7 +494,7 @@ def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None)
         "created_at", "updated_at", "status", "active_batch_id", "word_batch_count", "delivery_output_dir", "word_batches",
         "image_plan_workbook", "final_confirmation_sha256", "pending_request_count", "last_event_id",
     }
-    optional = {"writing_rules", "generation_rule"}
+    optional = {"writing_rules", "generation_rule", "production_control"}
     missing = expected - set(manifest)
     extra = set(manifest) - expected - optional
     if missing or extra:
@@ -502,6 +513,14 @@ def validate_manifest(manifest: dict[str, Any], project_dir: Path | None = None)
         rule_profiles.validate_selection(manifest["generation_rule"])
     if "writing_rules" in manifest:
         _validate_writing_rules_metadata(project_dir, manifest["writing_rules"])
+    if "production_control" in manifest:
+        control = manifest["production_control"]
+        _require_exact_keys(control, {"state", "updated_at", "reason"}, "生产中断状态")
+        if control.get("state") not in {"running", "paused"}:
+            raise ValueError("生产中断状态无效")
+        _require_nonempty_string(control.get("updated_at"), "生产中断状态更新时间")
+        if not isinstance(control.get("reason"), str) or len(control["reason"]) > 500:
+            raise ValueError("生产中断说明无效")
     _require_sha256(manifest.get("final_confirmation_sha256"), "最终交付确认摘要", nullable=True)
     _require_nonempty_string(manifest.get("created_at"), "创建时间")
     _require_nonempty_string(manifest.get("updated_at"), "更新时间")
@@ -634,6 +653,9 @@ def load_manifest(project_dir: Path) -> dict[str, Any]:
         changed = True
     if "generation_rule" not in manifest:
         manifest["generation_rule"] = rule_profiles.default_selection()
+        changed = True
+    if "production_control" not in manifest:
+        manifest["production_control"] = {"state": "running", "updated_at": utc_now(), "reason": ""}
         changed = True
     if changed:
         atomic_write_json(path, manifest)
@@ -1182,7 +1204,7 @@ def source_structure_metrics(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_source_against_confirmed_outline(project_dir: Path, source: dict[str, Any], batch: dict[str, Any]) -> None:
-    """Keep Stage-2 level 2/3 headings locked during Stage-4 production."""
+    """Keep the selected Stage-2 level 2/3 segments locked during production."""
     bound = confirm_ui.stage2_confirmation_valid(project_dir / confirm_ui.DATA_DIR_NAME)
     if not bound:
         raise ValueError("标书框架确认回执不存在或已失效，不能校验正文目录")
@@ -1193,28 +1215,72 @@ def validate_source_against_confirmed_outline(project_dir: Path, source: dict[st
         raise ValueError("已确认标书框架缺少目录树")
 
     expected: list[tuple[str, int, str, str]] = []
+    node_paths: dict[str, list[str]] = {}
+    node_map: dict[str, dict[str, Any]] = {}
 
-    def walk(nodes: Any, chapter_id: str, prefix: str) -> None:
+    def index_tree(nodes: Any, chapter_id: str, prefix: str, path_prefix: list[str]) -> None:
         if not isinstance(nodes, list):
             raise ValueError("已确认目录树结构无效")
         for index, node in enumerate(nodes, 1):
             if not isinstance(node, dict):
                 raise ValueError("已确认目录节点无效")
             number = str(node.get("number") or (f"{prefix}.{index}" if prefix else str(index))).strip()
-            level = int(node.get("level") or len(number.split(".")))
-            title = str(node.get("title", "")).strip()
-            if level in {2, 3}:
-                expected.append((chapter_id, level, number, title))
-            walk(node.get("children", []), chapter_id, number)
+            node_id = str(node.get("id", "")).strip()
+            if not node_id or node_id in node_map:
+                raise ValueError("已确认目录节点ID缺失或重复")
+            node_paths[node_id] = [*path_prefix, node_id]
+            node_map[node_id] = {**node, "number": number, "_chapter_id": chapter_id}
+            index_tree(node.get("children", []), chapter_id, number, [*path_prefix, node_id])
 
-    batch_chapter_ids = set(batch["chapter_ids"])
+    roots_by_id: dict[str, dict[str, Any]] = {}
     for root in roots:
         if not isinstance(root, dict):
             raise ValueError("已确认一级章节无效")
         chapter_id = str(root.get("id", "")).strip()
-        if chapter_id in batch_chapter_ids:
-            root_number = str(root.get("number", "")).strip()
-            walk(root.get("children", []), chapter_id, root_number)
+        if chapter_id:
+            roots_by_id[chapter_id] = root
+            index_tree(root.get("children", []), chapter_id, str(root.get("number", "")).strip(), [chapter_id])
+
+    include_ids: set[str] = set()
+
+    def walk_outline_nodes(node: dict[str, Any]):
+        yield node
+        children = node.get("children", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    yield from walk_outline_nodes(child)
+
+    segments = batch.get("segments")
+    if isinstance(segments, list) and segments:
+        for segment in segments:
+            path = segment.get("path_ids") if isinstance(segment, dict) else None
+            if not isinstance(path, list) or not path:
+                raise ValueError("Word批次目录分段缺少路径")
+            selected_id = str(path[-1])
+            if selected_id not in node_map and selected_id not in roots_by_id:
+                raise ValueError("Word批次目录分段不属于已确认框架")
+            include_ids.update(str(item) for item in path[1:])
+            selected_node = node_map[selected_id] if selected_id in node_map else roots_by_id[selected_id]
+            for node in walk_outline_nodes(selected_node):
+                node_id = str(node.get("id", "")).strip()
+                if node_id:
+                    include_ids.add(node_id)
+    else:
+        include_ids.update(node_paths)
+
+    def collect(nodes: Any, chapter_id: str, prefix: str) -> None:
+        for index, node in enumerate(nodes, 1):
+            number = str(node.get("number") or (f"{prefix}.{index}" if prefix else str(index))).strip()
+            level = int(node.get("level") or len(number.split(".")))
+            if str(node.get("id", "")).strip() in include_ids and level in {2, 3}:
+                expected.append((chapter_id, level, number, str(node.get("title", "")).strip()))
+            collect(node.get("children", []), chapter_id, number)
+
+    for root in roots:
+        chapter_id = str(root.get("id", "")).strip()
+        if chapter_id in batch.get("chapter_ids", []):
+            collect(root.get("children", []), chapter_id, str(root.get("number", "")).strip())
 
     # Older manually-created confirmations may contain no level-2/3 outline.
     # Keep those projects readable while enforcing the lock for current runs.
@@ -1385,11 +1451,19 @@ def _require_source_page_floor(source: dict[str, Any], batch: dict[str, Any], ca
 def validate_batch_image_alignment(project_dir: Path, source: dict[str, Any], batch: dict[str, Any]) -> None:
     """Reject source/Stage-3 drift before it reaches Word or the review page."""
     stage3_source, _stage3_receipt = _stage3_image_plan(project_dir)
-    expected = {
-        image["figure_no"]: (image["chapter_id"], image["name"])
-        for image in stage3_source["images"]
-        if image["chapter_id"] in batch["chapter_ids"]
-    }
+    if isinstance(batch.get("image_ids"), list):
+        selected_image_ids = set(batch["image_ids"])
+        expected = {
+            image["figure_no"]: (image["chapter_id"], image["name"])
+            for image in stage3_source["images"]
+            if image.get("id") in selected_image_ids
+        }
+    else:
+        expected = {
+            image["figure_no"]: (image["chapter_id"], image["name"])
+            for image in stage3_source["images"]
+            if image["chapter_id"] in batch["chapter_ids"]
+        }
     actual = {
         block["figure_no"]: (block["chapter_id"], block["name"])
         for block in source["blocks"]
@@ -1540,7 +1614,7 @@ def batch_reader_payload(project_dir: Path, batch_id: str, offset: int = 0, limi
     return {
         "batch": {
             "id": batch["id"], "order": batch["order"], "chapter_numbers": batch["chapter_numbers"],
-            "chapter_titles": batch["chapter_titles"], "planned_pages": batch["planned_pages"],
+            "chapter_titles": batch["chapter_titles"], "segments": copy.deepcopy(batch.get("segments", [])), "planned_pages": batch["planned_pages"],
             "actual_pages": source["actual_pages"], "status": batch["status"], "source_version": source["source_version"],
             "source_sha256": batch["source_sha256"], "export_filename": batch["output_filename"],
             "ai_recheck": ai_recheck,
@@ -1736,6 +1810,7 @@ def final_delivery_payload(project_dir: Path) -> dict[str, Any]:
         _write_manifest(project_dir, manifest)
     return {
         "status": manifest["status"], "eligible": eligible, "final_confirmed": manifest["status"] == "final_confirmed",
+        "production_control": copy.deepcopy(manifest.get("production_control", {"state": "running", "updated_at": manifest["updated_at"], "reason": ""})),
         "word_batches": entries,
         "image_plan_workbook": {"filename": workbook["filename"], "ready": image_ready, "detail": image_detail},
         "pending_request_count": manifest["pending_request_count"], "read_only": True,
@@ -1808,6 +1883,7 @@ def delivery_overview_payload(project_dir: Path) -> dict[str, Any]:
         batches.append({
             "id": batch["id"], "order": batch["order"], "chapter_numbers": batch["chapter_numbers"],
             "chapter_titles": batch["chapter_titles"], "planned_pages": batch["planned_pages"],
+            "segments": copy.deepcopy(batch.get("segments", [])),
             "status": batch["status"], "display_status": batch["status"], "readable": readable,
             "export_filename": batch["output_filename"], "ai_recheck": ai_recheck,
             "wps_status": wps_status, "actual_pages": actual_pages,
@@ -1821,6 +1897,7 @@ def delivery_overview_payload(project_dir: Path) -> dict[str, Any]:
             "chapter_count": summary.get("chapter_count"), "image_count": summary.get("image_count"),
         },
         "delivery": {"status": manifest["status"], "word_batch_count": manifest["word_batch_count"], "active_batch_id": manifest["active_batch_id"], "pending_request_count": manifest["pending_request_count"]},
+        "production_control": copy.deepcopy(manifest.get("production_control", {"state": "running", "updated_at": manifest["updated_at"], "reason": ""})),
         "batches": batches,
         "image_plan_workbook": {"filename": workbook["filename"], "status": workbook["status"], "planned_image_count": summary.get("image_count")},
         "read_only": True,
@@ -2416,6 +2493,23 @@ def _persist_event_and_manifest(project_dir: Path, manifest: dict[str, Any], eve
     return updated, event
 
 
+def set_production_control(project_dir: Path, state: str, reason: str = "") -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Persist a pause/resume request without stopping the review service."""
+    if state not in {"running", "paused"}:
+        raise ValueError("生产状态只能是运行或暂停")
+    if not isinstance(reason, str) or len(reason) > 500:
+        raise ValueError("暂停说明必须是500字以内的文本")
+    manifest = load_manifest(project_dir)
+    if manifest["status"] == "final_confirmed":
+        raise ValueError("最终交付已经确认，不能再更改生产状态")
+    current = manifest.get("production_control", {"state": "running", "updated_at": manifest["updated_at"], "reason": ""})
+    if current.get("state") == state:
+        return manifest, None
+    manifest["production_control"] = {"state": state, "updated_at": utc_now(), "reason": reason.strip()}
+    event_type = "production-paused" if state == "paused" else "production-resumed"
+    return _persist_event_and_manifest(project_dir, manifest, event_type, {"state": state, "reason": reason.strip()})
+
+
 def request_revision(project_dir: Path, batch_id: str, reason: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Move one reviewed batch into a persisted revision-pending state.
 
@@ -2544,7 +2638,7 @@ def wait_for_event(project_dir: Path, event_type: str, timeout: int, after_event
             # A direct edit is fully handled by the local deterministic
             # exporter.  Only AI requests and real confirmation gates resume
             # the host conversation.
-            matches = event["type"] == event_type if event_type != "user-action" else event["type"] in {"revision", "batch-confirmed", "image-plan-confirmed", "final-confirmed"}
+            matches = event["type"] == event_type if event_type != "user-action" else event["type"] in {"revision", "batch-confirmed", "image-plan-confirmed", "final-confirmed", "production-paused", "production-resumed"}
             if event["event_id"] > after_event_id and matches:
                 return event_dir(project_dir) / f"event-{event['event_id']:06d}.json"
         time.sleep(0.2)

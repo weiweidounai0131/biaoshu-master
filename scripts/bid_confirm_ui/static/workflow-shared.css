@@ -47,3 +47,36 @@
 .status-copy { display: inline; }
 @keyframes biaoshu-spinner-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media(prefers-reduced-motion:reduce){.spinner{animation-duration:1.6s}}
+
+/* Keep the workflow status rail available while letting users reclaim workspace width. */
+.sidebar-collapse-toggle{position:absolute;top:15px;right:12px;z-index:2;width:27px;height:27px;padding:0;border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#dce4f5;background:rgba(255,255,255,.07);font-size:20px;line-height:1;cursor:pointer}
+.sidebar-collapse-toggle:hover{background:rgba(255,255,255,.15)}
+@media(min-width:1001px){
+  body.sidebar-collapsed .app-shell{padding-left:72px!important}
+  body.sidebar-collapsed .sidebar{width:72px!important;padding-inline:9px!important}
+  body.sidebar-collapsed .sidebar .brand{justify-content:center;padding-inline:0;border-bottom-color:transparent}
+  body.sidebar-collapsed .sidebar .brand>div,body.sidebar-collapsed .sidebar .project-chip>div,body.sidebar-collapsed .sidebar .step div,body.sidebar-collapsed .sidebar .local-note>div,body.sidebar-collapsed .sidebar .privacy>div,body.sidebar-collapsed .sidebar .legend{display:none!important}
+  body.sidebar-collapsed .sidebar .project-chip{justify-content:center;margin:12px 0;padding:10px 0;border-color:transparent;background:transparent}
+  body.sidebar-collapsed .sidebar .steps{gap:5px}
+  body.sidebar-collapsed .sidebar .step{justify-content:center;padding-inline:0}
+  body.sidebar-collapsed .sidebar .step>span{margin:0}
+  body.sidebar-collapsed .sidebar .local-note,body.sidebar-collapsed .sidebar .privacy{display:none!important}
+  body.sidebar-collapsed .sidebar-collapse-toggle{right:22px;top:91px}
+  body.sidebar-collapsed .actionbar{left:72px!important}
+}
+@media(max-width:1000px){.sidebar-collapse-toggle{display:none!important}}
+
+.subagent-modal-card{width:min(620px,94vw);text-align:left}
+.subagent-modal-card>.rule-modal-mark{margin:0 auto 14px}
+.subagent-modal-card h2,.subagent-modal-card>p{text-align:center}
+.subagent-choices{display:grid;gap:9px;margin:19px 0}
+.subagent-choices label{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:#fbfcff;cursor:pointer}
+.subagent-choices label:has(input:checked){border-color:#8aadd8;background:#f1f6fd;box-shadow:0 0 0 2px rgba(35,92,166,.08)}
+.subagent-choices input{margin-top:3px;accent-color:var(--blue)}
+.subagent-choices strong,.subagent-choices small{display:block}
+.subagent-choices strong{font-size:13px;color:var(--ink)}
+.subagent-choices small{margin-top:4px;color:var(--muted);font-size:11px}
+.subagent-assignment-label{display:block;margin:0 0 7px;font-size:12px;font-weight:700}
+#subagent-assignment{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;resize:vertical;line-height:1.6}
+#subagent-assignment:focus{outline:0;border-color:#7394c1;box-shadow:0 0 0 3px rgba(35,92,166,.09)}
+.batch-option input:disabled+label{opacity:.42;cursor:not-allowed}

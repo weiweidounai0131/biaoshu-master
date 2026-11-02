@@ -86,9 +86,11 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
   lock.json
 ```
 
-- `manifest.json`记录项目、阶段4回执哈希、批次数、每批章节、生成状态、AI复校状态、人工审校状态、导出状态和交付路径。
+- `manifest.json`记录项目、阶段4回执哈希、批次数、每批一级章节与目录分段、生成状态、生产暂停状态、AI复校状态、人工审校状态、导出状态和交付路径。
 - `stage4-writing-rules.md`是阶段4授权后从技能参考文件固化到项目内的标书生成规则快照；`manifest.json.writing_rules`记录其摘要。当前AI必须在每个批次开始前读取该快照，不能以聊天记忆或旧规则替代。
 - `manifest.json.generation_rule`记录本次授权选择的规则ID、名称、来源文件和摘要；规则选择不会改变阶段1至3的项目事实和确认回执。
+- `manifest.json.production_control`记录Stage4的`running`或`paused`状态；暂停/继续事件也写入事件流。暂停不会改变批次状态或关闭生产服务。
+- 每个新格式`word_batches[]`同时记录`chapter_ids`和`segments`。`chapter_ids`用于源稿根章节索引，`segments`是本批实际正文边界；同一一级章节可出现在多个批次，但各批的分段路径不得重叠。`image_ids`决定当前批应包含的图片占位，不能仅按一级章节重复插入整章图片。
 - `source/batch-NN.json`保存该批正文的标题树和有序内容块；内容块至少区分正文、列表、表格、图片占位、材料待补位和分页控制。
 - 阶段2确认的一至三级目录是锁定骨架；阶段4只能在已有三级标题下增加四级及以下真实子主题，不能在正文阶段静默改写一至三级目录。
 - `source/image-plan.json`由阶段3回执确定，作为Excel导出的结构化来源。
@@ -101,9 +103,10 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
 
 第二阶段起，每个已生成批次的`source/batch-NN.json`必须使用`bid_delivery_source`结构：绑定`project_id`、`stage4_confirmation_sha256`、批次ID与顺序、源稿版本、生成/更新时间、`writing_rules_sha256`、计划/实际页数、一级至六级标题树及连续编号内容块。内容块仅允许：`paragraph`、`list`、`table`、`image_placeholder`、`material_placeholder`和`page_break`。`writing_rules_sha256`必须等于当前项目`manifest.json.writing_rules.project_sha256`，否则不得登记Word。
 
-- 标题树必须与阶段4授权的该批章节范围、编号和标题完全一致；层级最多六级。二级标题必须使用已确认一级章节编号，三级及以下标题必须使用直接父标题编号前缀；同一二级下三级标题最多7个，同一三级下四级标题最多7个。
+- 标题树必须与阶段4授权的该批目录分段完全一致；新回执按授权的`segments`生成，旧版回执按完整一级章节生成。若分段从三级标题开始，允许在源稿开头保留其所属一级和二级标题作为上下文，但不得生成其他同级分段的正文。层级最多六级。二级标题必须使用已确认一级章节编号，三级及以下标题必须使用直接父标题编号前缀；同一二级下三级标题最多7个，同一三级下四级标题最多7个。
 - 每个四级及以下标题必须有至少两个正文、列表或表格内容块支撑；低密度章节优先扩展已有段落，不得用单句标题制造页数。
 - 内容块按`order`连续编号并关联本批某一章节；表格必须有表头及等列行；图片占位只表达图号、名称和放置说明，不代表已经生图或插图。
+- 新格式批次只允许出现其授权`segments`覆盖的二、三级标题与正文；三级分段可以重复显示所属一级、二级标题以便阅读，但不得包含其他分段正文。图片占位必须恰好对应本批`image_ids`。
 - 本地页面只通过`GET /api/overview`读取交付元数据，并通过`GET /api/batches/<batch_id>/reader?offset=<n>&limit=<n>`按内容块分页读取正文；单次最多80块，不一次加载长篇全文。
 - 页面及接口在本阶段严格只读。没有源稿、源稿哈希不匹配、章节范围不一致、仍未生成或AI复校未通过的批次，均不得显示正文；只有复校通过后才开放人工审阅和确认。
 
@@ -121,13 +124,13 @@ Word二进制文件不作为唯一权威稿。每个批次先形成结构化权�
 
 ### 0. 选择生产调度模式
 
-Stage4最终授权中记录用户选择的Word批次数。选择1批时直接使用串行模式；选择2至5批时，当前AI必须先按[Stage4多批次并行生产协议](parallel-batch-production.md)检查当前宿主是否支持指定数量的子代理并发。能力不明确、并发上限不足、不能隔离项目文件、不能收集子代理结果或不能保持主任务继续运行时，记录`parallel_mode: serial_fallback`并按串行模式继续。
+Stage4推荐文件记录本次宿主实际子代理能力，能力不明时按不支持处理。支持子代理且用户选择多批时，Stage4授权回执保存其明确选择的安排方式：由AI安排、由用户填写分工，或由一个AI完成。用户选择单AI时必须串行生产；能力不支持时网页不显示子代理选项。
 
-只有能力检查真实通过后，才能记录`parallel_mode: parallel`并创建与批次数相同的子代理。并行模式不能由浏览器按钮触发，浏览器不创建子代理，也不能把后台 shell 或多个普通聊天窗口当作子代理。
+用户明确选择开启子代理后，当前AI仍必须按[Stage4多批次并行生产协议](parallel-batch-production.md)核对当下并发能力、结果收集、目录隔离和工作区写权限。任一条件不满足时停止并说明原因，不能悄悄改用用户未选择的安排方式。用户自行填写分工时，协调者必须遵照该分工；网页只记录选择，不创建子代理。
 
 ### 1. 接收授权
 
-AI等待有效`stage4-confirmation.json`。回执出现后重新验证阶段1至4绑定关系，读取用户选择的1至5个Word批次和固定1个图片规划Excel；执行`--init`后先读取项目内`stage4-writing-rules.md`，再开始正文生产。
+AI等待有效`stage4-confirmation.json`。回执出现后重新验证阶段1至4绑定关系，读取用户选择的1至5个Word批次、每批`segments`与`image_ids`、子代理安排及固定1个图片规划Excel；执行`--init`后先读取项目内`stage4-writing-rules.md`，再开始正文生产。
 
 ### 2. 初始化交付清单
 
@@ -277,15 +280,22 @@ python3 scripts/bid_delivery_ui/export_image_plan.py <project_dir> \
 python3 scripts/bid_delivery_ui/server.py <project_dir> --init
 python3 scripts/bid_delivery_ui/server.py <project_dir> --daemon
 python3 scripts/bid_delivery_ui/server.py <project_dir> --wait-only --wait-event user-action --wait-timeout 0
+python3 scripts/bid_delivery_ui/server.py <project_dir> --control-status
+python3 scripts/bid_delivery_ui/server.py <project_dir> --set-production-control paused --control-reason "用户要求暂停"
+python3 scripts/bid_delivery_ui/server.py <project_dir> --resume
+python3 scripts/bid_delivery_ui/server.py <project_dir> --set-production-control running
 python3 scripts/bid_delivery_ui/server.py <project_dir> --shutdown
 ```
 
 - `--init`只在阶段4最终授权有效时创建交付清单；已有清单只校验并恢复，绝不静默覆盖。
-- `--daemon`只启动并健康检查生产服务，然后打印实际URL；正常第4阶段必须配合`--no-browser`使用，**不得另开浏览器标签**。前置确认页会在生产服务就绪后自动以当前标签替换为生产与审校页；只有恢复排障且原页面已关闭时，才由用户手动打开打印出的URL。
-- `--wait-only --wait-event user-action --wait-timeout 0`无限等待AI修改请求、批次确认、图片规划确认或最终确认；人工直接修改由本地服务同步保存并确定性重导出，但导出后仍必须由当前AI完成复校并重新登记回执。当前AI收到任一中间事件后，必须在同一对话中应用修改、复校、重新导出或生成下一批，然后立刻重新进入无限等待。宿主若强制后台化等待命令，AI必须立即续等，不得收尾或结束任务；仅`final-confirmed`允许进入交付汇总和结束。
+- `--daemon`只启动并健康检查生产服务，然后打印实际URL；正常第4阶段必须配合`--no-browser`使用，**不得另开浏览器标签**。前置确认页会在生产服务就绪后自动以当前标签替换为生产与审校页。跨回合执行`--resume`时，健康服务只附着、不重复开页；若服务已停止或端口失效，`--resume`会从项目目录恢复服务并自动尝试打开生产审校页。若服务健康但用户单独关闭了页面，AI确认需要重开后才使用`--resume --open-browser`。
+- `--wait-only --wait-event user-action --wait-timeout 0`无限等待AI修改请求、批次确认、图片规划确认、生产暂停/继续或最终确认；人工直接修改由本地服务同步保存并确定性重导出，但导出后仍必须由当前AI完成复校并重新登记回执。普通中间事件必须继续处理；收到`production-paused`时是明确的暂停例外，当前AI在安全检查点停止新增工作、保存状态并可结束本轮，绝不停止服务。宿主若强制后台化等待命令，AI必须立即续等；收到暂停事件时无需无限等待。`final-confirmed`允许进入交付汇总和结束。
+- 暂停与继续只由当前AI通过`--set-production-control paused`或`--set-production-control running`执行，生产页没有暂停/继续按钮，只读取`manifest.json.production_control`并显示状态。收到用户在AI对话中的暂停要求后，AI写入`paused`状态，在安全检查点停止新增生产，保留本地服务、页面和检查点；前端会通过轮询显示“生产已暂停，进度已保存”。只有用户在AI对话中明确要求继续时，AI才写入`running`并接续。
+- 每次AI跨回合恢复生产（包括电脑重启后），必须先运行`--resume`再读取`--control-status`和批次状态。若服务仍健康，`--resume`只附着现有实例，不另开页面；若服务锁失效、端口无响应或进程已因重启消失，`--resume`使用现有manifest和批次文件自动重启服务并尝试打开本地审校页，然后继续显示持久化的暂停状态。若服务健康但页面被单独关闭，只有确认需要重开时才运行`--resume --open-browser`。重新启动服务不会自动把`paused`改为`running`。
+- `--set-production-control paused`和`--set-production-control running`会先确保本地审校服务可用，再以原子方式更新manifest并写入对应事件；这样AI暂停时状态页能继续展示，AI跨回合恢复时也能自动恢复页面。暂停期间不能把未完整文件登记为完成。只有最终交付确认或用户确认回退前序阶段时，才允许关闭服务。
 - 同一项目只允许一个生产审校服务；死进程锁可安全恢复。
 - 生产台的阶段1至3导航是只读回看，不得因为Stage4交付服务正在运行而强制跳回Stage4。用户在前序阶段确认“修改本阶段”后，确认台会先停止本项目的生产审校服务并归档当前`bid_delivery/`；当前AI必须立即停止旧Stage4生成/复校链，重新读取`workflow-state.json`，从恢复的阶段继续，不能继续使用旧Stage4授权或旧交付清单。
-- 服务仅监听`127.0.0.1`，所有资料和正文保留在本机。
+- 服务仅监听`127.0.0.1`，所有资料和正文保留在本机。它以独立会话运行，AI对话暂停或重启不应清除项目manifest、事件或已生成批次；机器重启后可由`--resume`使用原项目文件恢复服务。
 - 页面关闭不等于确认；已提交的修改请求和确认回执必须持久化。
 - AI任务若已结束，用户以后重新调用同一技能时，AI从`manifest.json`和未处理请求恢复，不从头生成。
 

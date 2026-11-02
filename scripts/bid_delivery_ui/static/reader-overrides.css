@@ -56,3 +56,12 @@
   background: #d9263f;
   box-shadow: 0 8px 20px rgba(217,38,63,.28);
 }
+
+.sidebar-collapse-toggle{position:absolute;top:16px;right:14px;z-index:3;width:28px;height:28px;padding:0;border:1px solid rgba(255,255,255,.16);border-radius:8px;color:#e3e9f8;background:rgba(255,255,255,.08);font-size:20px;line-height:1;cursor:pointer}
+.sidebar-collapse-toggle:hover{background:rgba(255,255,255,.16)}
+.production-control-banner{max-width:1510px;margin:0 auto 17px;padding:13px 16px;display:flex;align-items:center;justify-content:flex-start;gap:18px;border:1px solid #d8e4f3;border-radius:14px;background:#f8fbff}
+.production-control-banner strong,.production-control-banner small{display:block}
+.production-control-banner strong{font-size:13px}
+.production-control-banner small{margin-top:4px;color:var(--muted);font-size:11px;line-height:1.55}
+.production-control-banner.paused{border-color:#f0d39c;background:#fff9eb}
+@media(min-width:1001px){body.sidebar-collapsed .sidebar{width:72px!important;padding:22px 9px!important}body.sidebar-collapsed .workspace{margin-left:72px!important}body.sidebar-collapsed .sidebar .brand{justify-content:center;padding-inline:0;border-bottom-color:transparent}body.sidebar-collapsed .sidebar .brand>div,body.sidebar-collapsed .sidebar .project-card p,body.sidebar-collapsed .sidebar .project-card strong,body.sidebar-collapsed .sidebar .stages .stage div,body.sidebar-collapsed .sidebar .sidebar-note{display:none!important}body.sidebar-collapsed .sidebar .project-card{margin:14px 0;padding:10px 0;text-align:center;border-color:transparent;background:transparent}body.sidebar-collapsed .sidebar .signal{display:inline-block;float:none;margin:0}body.sidebar-collapsed .sidebar .stages{gap:5px}body.sidebar-collapsed .sidebar .stage{justify-content:center;padding:9px 0}body.sidebar-collapsed .sidebar .sidebar-collapse-toggle{right:22px;top:82px}}

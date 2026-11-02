@@ -4,14 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>生产与审校台 · 标书</title>
-  <link rel="stylesheet" href="/reader.css">
+  <link rel="stylesheet" href="/reader.css?v=3">
   <link rel="stylesheet" href="/review.css?v=2">
-  <link rel="stylesheet" href="/reader-overrides.css?v=2">
+  <link rel="stylesheet" href="/reader-overrides.css?v=5">
   <link rel="stylesheet" href="/reader-scale.css?v=3">
   <link rel="stylesheet" href="/reader-editable.css?v=2">
 </head>
 <body>
   <aside class="sidebar">
+    <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" aria-label="收起左侧状态栏" title="收起左侧状态栏">‹</button>
     <div class="brand"><span class="brand-mark">BS</span><div><span class="brand-en">BID MASTER</span><strong>标书审校台</strong></div></div>
     <div class="project-card"><span class="signal"></span><p>当前项目</p><strong id="project-name">正在读取项目</strong></div>
     <nav class="stages" aria-label="生产审校阶段">
@@ -24,6 +25,9 @@
   </aside>
 
   <main class="workspace">
+    <section class="production-control-banner" id="production-control-banner" aria-live="polite">
+      <div><strong id="production-control-title">生产运行中</strong><small id="production-control-detail">AI正在生产。需要暂停或继续时，请在AI对话中告诉AI；本页面只显示状态。</small></div>
+    </section>
     <header class="topbar">
       <div><p class="eyebrow">第四阶段 · 生产与审校</p><h1>查看交付进度与已生成内容</h1><p class="subtitle">每批 Word 先经过当前 AI 复校，再开放人工审阅。页面不调用 AI。</p></div>
       <div class="metrics"><div><b id="metric-batches">—</b><small>Word批次</small></div><div><b id="metric-pages">—</b><small>计划页数</small></div><div><b id="metric-images">—</b><small>规划图片</small></div></div>
@@ -81,6 +85,6 @@
     </section>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/reader.js?v=12"></script>
+  <script src="/reader.js?v=14"></script>
 </body>
 </html>

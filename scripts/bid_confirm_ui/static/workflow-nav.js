@@ -7,8 +7,35 @@
   ];
   let latest = null;
   const page = document.body.dataset.pageStage || "stage1";
+  const SIDEBAR_COLLAPSE_KEY = "biaoshu-master.confirm-sidebar-collapsed.v2";
   const instanceId = sessionStorage.getItem("biaoshu-confirm-page-instance") || (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`);
   sessionStorage.setItem("biaoshu-confirm-page-instance", instanceId);
+
+  function mountSidebarToggle() {
+    const sidebar = document.querySelector(".sidebar");
+    if (!sidebar || sidebar.querySelector(".sidebar-collapse-toggle")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "sidebar-collapse-toggle";
+    button.setAttribute("aria-label", "收起左侧状态栏");
+    button.title = "收起左侧状态栏";
+    sidebar.appendChild(button);
+    const apply = (collapsed) => {
+      document.body.classList.toggle("sidebar-collapsed", collapsed);
+      button.textContent = collapsed ? "›" : "‹";
+      button.setAttribute("aria-expanded", String(!collapsed));
+      button.setAttribute("aria-label", collapsed ? "展开左侧状态栏" : "收起左侧状态栏");
+      button.title = collapsed ? "展开左侧状态栏" : "收起左侧状态栏";
+    };
+    let collapsed = false;
+    try { const saved = localStorage.getItem(SIDEBAR_COLLAPSE_KEY); collapsed = saved === "1"; } catch (_) {}
+    apply(collapsed);
+    button.addEventListener("click", () => {
+      collapsed = !document.body.classList.contains("sidebar-collapsed");
+      apply(collapsed);
+      try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY, collapsed ? "1" : "0"); } catch (_) {}
+    });
+  }
 
   function reportPresence() {
     fetch("/api/page-presence", {
@@ -92,6 +119,7 @@
   }, true);
 
   window.WorkflowNav = {refresh, apply, get state(){return latest;}};
+  mountSidebarToggle();
   reportPresence();
   window.setInterval(reportPresence, 15000);
   document.addEventListener("visibilitychange", reportPresence);
