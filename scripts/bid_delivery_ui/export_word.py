@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -249,12 +250,30 @@ def export_word(project_dir: Path, batch_id: str) -> dict[str, Any]:
     return {"manifest": updated, "output": str(output_path), "validation": validation}
 
 
+def preview_word(project_dir: Path, batch_id: str) -> dict[str, Any]:
+    """Render a temporary Word for page and structure checks without registration."""
+    manifest, batch, source = protocol.load_batch_source_for_export(project_dir, batch_id)
+    calibration = protocol.load_page_calibration(project_dir)
+    with tempfile.TemporaryDirectory(prefix="biaoshu-word-preview-") as temp_dir:
+        preview_path = Path(temp_dir) / "preview.docx"
+        document_from_source(source).save(preview_path)
+        validation = validate_docx(preview_path, source, calibration["ratio"])
+    validation.update({"project_id": manifest["project_id"], "batch_id": batch_id, "preview_only": True})
+    return {"batch_id": batch_id, "batch_order": batch["order"], "validation": validation}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="导出一批主标Word")
     parser.add_argument("project_dir", type=Path)
     parser.add_argument("--batch", required=True, dest="batch_id")
+    parser.add_argument("--preview", action="store_true", help="临时渲染并检查结构/预计页数，不写入正式Word、不登记复校")
     args = parser.parse_args()
-    result = export_word(args.project_dir.expanduser().resolve(), args.batch_id)
+    project_dir = args.project_dir.expanduser().resolve()
+    if args.preview:
+        result = preview_word(project_dir, args.batch_id)
+        print(json.dumps({"status": "preview_only", **result}, ensure_ascii=False))
+        return 0
+    result = export_word(project_dir, args.batch_id)
     print(json.dumps({"output": result["output"], "status": result["manifest"]["status"], "validation": result["validation"]}, ensure_ascii=False))
     return 0
 

@@ -953,6 +953,26 @@ def validate_ai_recheck_report(report: dict[str, Any], manifest: dict[str, Any],
         "stage4_confirmation_sha256", "source_sha256", "export_sha256", "writing_rules_sha256",
         "checked_at", "checker", "rules_read", "scope", "summary", "findings",
     }
+    if not isinstance(report, dict):
+        raise ValueError("AI复校报告必须是完整JSON对象")
+    if set(report) != expected:
+        missing = set(expected) - set(report)
+        extra = set(report) - set(expected)
+        labels = {
+            "project_id": "project_id（项目ID）",
+            "batch_id": "batch_id（批次ID）",
+            "batch_order": "batch_order（批次顺序）",
+            "stage4_confirmation_sha256": "stage4_confirmation_sha256（Stage4授权指纹）",
+            "source_sha256": "source_sha256（结构化源稿指纹）",
+            "export_sha256": "export_sha256（Word文件指纹）",
+            "writing_rules_sha256": "writing_rules_sha256（生成规则指纹）",
+        }
+        details = []
+        if missing:
+            details.append("缺少 " + "、".join(labels.get(key, key) for key in sorted(missing)))
+        if extra:
+            details.append("不支持 " + "、".join(str(key) for key in sorted(extra)))
+        raise ValueError("AI复校报告绑定字段不完整：" + "；".join(details))
     _require_exact_keys(report, expected, "AI复校报告")
     if report.get("schema_version") != SCHEMA_VERSION or report.get("kind") != "bid_delivery_ai_recheck":
         raise ValueError("AI复校报告版本不支持")
@@ -1058,8 +1078,8 @@ def _ai_recheck_coverage(source: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def record_ai_recheck(project_dir: Path, batch_id: str, report: dict[str, Any]) -> dict[str, Any]:
-    """Record the current AI's completed semantic recheck and advance the gate."""
+def validate_ai_recheck_submission(project_dir: Path, batch_id: str, report: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Check report bindings against the current batch without writing state."""
     manifest = load_manifest(project_dir)
     batch = _batch_by_id(manifest, batch_id)
     if manifest["status"] != "ai_rechecking" or batch["status"] != "ai_rechecking":
@@ -1072,6 +1092,12 @@ def record_ai_recheck(project_dir: Path, batch_id: str, report: dict[str, Any]) 
     for key in ("checked_blocks", "checked_paragraphs", "checked_sections"):
         if summary[key] < coverage[key]:
             raise ValueError(f"AI复校报告未覆盖全部{key.replace('checked_', '')}")
+    return manifest, batch
+
+
+def record_ai_recheck(project_dir: Path, batch_id: str, report: dict[str, Any]) -> dict[str, Any]:
+    """Record the current AI's completed semantic recheck and advance the gate."""
+    manifest, batch = validate_ai_recheck_submission(project_dir, batch_id, report)
     path = _ai_recheck_path(project_dir, batch)
     atomic_write_json(path, report)
     if report["status"] == "passed":

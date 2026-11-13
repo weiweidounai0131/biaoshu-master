@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Record one completed AI semantic recheck for a Word delivery batch.
+"""Preflight or record one completed AI semantic recheck for a Word batch.
 
 The script deliberately does not call a model.  The current AI reads the
 project-local rules, source and exported Word, writes the report JSON, and
-uses this command to pass the result through the durable delivery gate.
+uses this command to verify the bindings before recording the result through
+the durable delivery gate.
 """
 
 from __future__ import annotations
@@ -20,15 +21,30 @@ except ImportError:  # Direct CLI execution.
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="登记一批Word的AI复校结果")
+    parser = argparse.ArgumentParser(description="预检或登记一批Word的AI复校结果")
     parser.add_argument("project_dir", type=Path)
     parser.add_argument("--batch", required=True, dest="batch_id")
     parser.add_argument("--report", required=True, type=Path, help="当前AI写入的完整复校报告JSON")
+    parser.add_argument("--validate-only", action="store_true", help="只核对项目、批次和当前文件指纹，不写入复校结果")
     args = parser.parse_args()
 
     try:
         project_dir = args.project_dir.expanduser().resolve()
         report = protocol.read_json(args.report.expanduser().resolve())
+        if args.validate_only:
+            manifest, batch = protocol.validate_ai_recheck_submission(project_dir, args.batch_id, report)
+            print(json.dumps({
+                "status": "validated",
+                "report_status": report["status"],
+                "project_id": manifest["project_id"],
+                "batch_id": batch["id"],
+                "batch_order": batch["order"],
+                "binding_fields_verified": [
+                    "project_id", "batch_id", "batch_order", "stage4_confirmation_sha256",
+                    "source_sha256", "export_sha256", "writing_rules_sha256",
+                ],
+            }, ensure_ascii=False))
+            return 0
         result = protocol.record_ai_recheck(project_dir, args.batch_id, report)
         batch = next(item for item in result["manifest"]["word_batches"] if item["id"] == args.batch_id)
         print(json.dumps({

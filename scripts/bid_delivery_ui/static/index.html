@@ -6,9 +6,9 @@
   <title>生产与审校台 · 标书</title>
   <link rel="stylesheet" href="/reader.css?v=3">
   <link rel="stylesheet" href="/review.css?v=2">
-  <link rel="stylesheet" href="/reader-overrides.css?v=5">
   <link rel="stylesheet" href="/reader-scale.css?v=3">
   <link rel="stylesheet" href="/reader-editable.css?v=2">
+  <link rel="stylesheet" href="/reader-overrides.css?v=6">
 </head>
 <body>
   <aside class="sidebar">
@@ -49,8 +49,8 @@
       <div class="reader-panel card">
         <div class="reader-head"><div><p class="section-label">结构化源稿 · 本地审校</p><h2 id="reader-title">请选择已生成的 Word 批次</h2><p id="reader-meta">未生成的批次不会加载正文。</p><p id="reader-validation" class="validation-info" hidden></p><div id="wps-page-check" class="wps-page-check" hidden><span id="wps-page-note"></span><input id="wps-actual-pages" type="number" min="1" inputmode="numeric" aria-label="WPS实际页数"><button id="save-wps-pages" type="button">登记页数</button></div></div><span id="reader-version" class="version-tag" hidden></span></div>
         <div id="reader-empty" class="reader-empty"><span>文</span><h3>暂无可阅读正文</h3><p>当前仅展示已完成 AI 复校和本地导出校验的批次。生成 Word 后，请等待复校通过。</p></div>
-        <article id="reader-content" class="reader-content" hidden></article>
-        <div id="reader-footer" class="reader-footer" hidden><span id="reader-progress"></span><div class="reader-actions"><button id="load-more" type="button">展开更多内容</button><button id="confirm-batch" class="button-primary" type="button" hidden>确认并交付本批 Word</button><button id="confirm-image-plan" class="button-primary" type="button" hidden>确认并交付图片规划 Excel</button></div></div>
+        <article id="reader-content" class="reader-content" tabindex="0" aria-label="批次正文，可滚动阅读" hidden></article>
+        <div id="reader-footer" class="reader-footer" hidden><div class="reader-progress-copy"><span id="reader-progress"></span><small id="reader-load-status" aria-live="polite" hidden></small></div><div class="reader-actions"><button id="confirm-batch" class="button-primary" type="button" hidden>确认并交付本批 Word</button><button id="confirm-image-plan" class="button-primary" type="button" hidden>确认并交付图片规划 Excel</button></div></div>
       </div>
       <aside class="revision-panel card">
         <div class="revision-head"><p id="revision-kicker" class="section-label">右侧 · 修改面板</p><h2 id="revision-title">对当前正文提出修改</h2><p id="revision-target">请先在中间内容区选择一段正文。</p></div>
@@ -85,6 +85,6 @@
     </section>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/reader.js?v=14"></script>
+  <script src="/reader.js?v=15"></script>
 </body>
 </html>

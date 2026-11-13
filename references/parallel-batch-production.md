@@ -59,8 +59,8 @@ parallel_mode: serial_fallback
 1. 读取规则快照和当前批次所需的已确认资料；
 2. 按确认的一至三级骨架生成结构化源稿，并只在其下扩展真实的四级及以下内容；
 3. 按本批计划页数组织足量实质内容，不使用重复段落、空泛承诺或无归属标题凑页；
-4. 导出本批 Word，并完成本地包结构、可重新打开、标题、表格、占位和预计页数校验；
-5. 将源稿、Word、校验结果、源稿摘要和导出摘要写入自己的临时命名空间；
+4. 先用临时预览估算页数；低于计划90%时按累计缺页量合并扩充多个薄弱章节，并重复本地结构、事实边界和页数检查，不对每个小补丁执行完整AI复校；达到登记门槛后再导出正式Word，并完成本地包结构、可重新打开、标题、表格、占位和预计页数校验；
+5. 将源稿、正式Word、校验结果、源稿摘要和导出摘要写入自己的临时命名空间；
 6. 返回明确的成功或失败结果、实际文件位置、摘要、预计页数和未解决问题。
 
 子代理不得：
@@ -97,7 +97,7 @@ parallel_mode: serial_fallback
 - 批次 ID、顺序和章节范围是否正确；
 - 源稿是否符合 `bid_delivery_source` 结构并绑定相同授权和规则摘要；
 - Word 和源稿是否一一对应，摘要是否匹配；
-- 本地导出校验是否通过，预计页数是否达到批次计划页数的 90%；
+- 是否先完成临时预览和必要的集中补页，再正式导出；本地导出校验是否通过，预计页数是否达到批次计划页数的 90%；
 - 是否存在文件缺失、空输出、跨批写入或未解决阻断问题。
 
 只要有一个批次失败，不能把其他批次直接开放给用户确认。优先只重试失败的子代理；若重试后仍失败，或宿主不再支持并行，保留有效的临时结果但将整个本次运行切换到 `serial_fallback`，由当前 AI 按原串行协议完成缺失批次。不得重复覆盖已经确认或已经交付的旧版本。
@@ -113,7 +113,7 @@ parallel_mode: serial_fallback
 
 如果宿主还支持独立复校子代理，可以并行生成批次内复校报告，但必须由当前 AI 汇总并另外完成跨批统一复校。任何一个批次或统一复校存在 `blocking` 问题，都不能进入人工审阅；必须修复对应源稿、重新导出并重新复校。
 
-正式复校回执仍必须绑定每批的 Stage4 授权摘要、源稿摘要、Word 摘要和规则摘要，`scope`必须包含 `writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export` 和 `page_budget`。不能因为多个子代理同时生成，就省略 `cross_batch_consistency`。
+正式复校回执仍必须绑定每批的项目ID、批次ID与顺序、Stage4授权摘要、源稿摘要、Word摘要和规则摘要，`scope`必须包含 `writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export` 和 `page_budget`。每个批次必须分别运行`ai_recheck.py --validate-only`核对绑定字段，再正式登记；`passed`批次必须返回`batch_status: ready_for_review`，`failed`批次必须返回`regenerating`并立即修复。不得把缺失字段留到全部批次或最终确认时才暴露。不能因为多个子代理同时生成，就省略 `cross_batch_consistency`。
 
 ## 审校页与人工确认
 

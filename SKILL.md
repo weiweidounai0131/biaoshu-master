@@ -266,7 +266,7 @@ Stage2生成的一级至三级标题也必须独立可读、语义完整，并�
 
 生成Stage4推荐文件前，当前AI必须实际检查本次宿主是否能创建、并发运行、隔离写入并回收子代理结果；能力不明确时按不支持处理。若支持，运行`python3 scripts/build_stage4_recommendations.py <project_dir> --subagents-available --subagent-max-parallel <真实可用上限>`，使最终确认页在用户授权前显示三种生产方式；若不支持，不传这两个参数。不得根据模型名称或过去会话能力推断当前支持情况。用户选择1批时不创建子代理；选择多批时，必须遵从最终确认页的选择：由AI安排、按用户填写的分工安排，或由单AI完成。任何并行子代理仍须遵守[Stage4多批次并行生产协议](references/parallel-batch-production.md)，并由当前AI完成统一复校。
 
-并行模式下一个子代理只负责一个Word批次，所有子代理使用同一份Stage4规则快照、项目事实、确认目录和篇幅预算，并写入各自的临时命名空间；不得并发覆盖共享manifest、事件流、其他批次源稿或确认回执。全部批次收集完成后，当前AI仍必须统一执行批次内和跨批AI复校，任何批次复校失败都不能开放人工确认。并行只减少生产等待，不改变资料边界、规则门禁、人工审阅和最终交付条件。
+并行模式下一个子代理只负责一个Word批次，所有子代理使用同一份Stage4规则快照、项目事实、确认目录和篇幅预算，并写入各自的临时命名空间；不得并发覆盖共享manifest、事件流、其他批次源稿或确认回执。所有批次收集、正式导出后，当前AI逐批预检并登记包含项目ID、批次ID、授权摘要、源稿摘要、Word摘要和规则摘要的复校报告，然后完成跨批AI复校；缺字段或摘要不匹配的批次必须立即阻断，不能留到最后汇总时才发现。任何批次复校失败都不能开放人工确认。并行只减少生产等待，不改变资料边界、规则门禁、人工审阅和最终交付条件。
 
 阶段4授权后，**不得关闭前置确认台或要求用户打开新的地址**。先执行`python3 scripts/bid_delivery_ui/server.py <project_dir> --init`初始化并校验交付清单；Stage4页面的“生成规则”默认使用当前 Skill 的通用规则，也可以选择规则索引中的领域预设或用户自定义规则。用户选中的规则会随最终授权回执绑定，`--init`会把默认规则与选中的领域覆盖层固化为项目内的`bid_delivery/stage4-writing-rules.md`，并在`manifest.json`中登记规则摘要和规则ID。当前AI必须读取该项目快照后才能生成正文；每个`source/batch-NN.json`必须写入同一`writing_rules_sha256`，规则文件缺失、被替换或摘要不一致时不得继续生产。随后再以`--daemon --no-browser`启动生产与审校服务。该服务可以使用新的本地端口，但只作为后台承载；原确认页检测到服务就绪后必须用`location.replace()`在同一浏览器标签内切换到生产与审校页。只有用户在前序阶段实际点击“修改本阶段”并确认回退时，才归档生产台并将第4页恢复为最终确认页；单纯回看前序步骤不得改变第4页。AI不得只在聊天中生成Word后结束：每批正文必须先写入项目内的结构化权威稿，审校台从该权威稿展示正文、标题、表格、列表、图片占位和批次状态；Word是由权威稿导出的交付文件，不是浏览器编辑的唯一数据源。正文生产必须分别读取阶段1/入口回执中的`background_paths`与`reference_paths`：前者约束项目事实、评分和承诺，后者只提供经核对后可采用的策略与表达，不得直接混入客户、人员、业绩、数字或承诺。
 
@@ -278,15 +278,19 @@ Stage4写作不是“拿到资料后自由发挥”。正式生成任何正文�
 
 交付前执行“首次阅读检查”：逐个检查标题是否能直接回答“这一节讲什么服务或交付物”，逐段检查是否能看出“谁做什么、针对什么对象、何时或何种条件下执行、留下什么结果”。读者必须依靠内部推理才能理解的抽象表达，应改成具体业务语言；若真实项目事实或证明材料缺失，改为醒目的待处理标注，不得用审稿式免责声明代替正文。
 
-当前生产与审校台已支持交付总览、批次导航、按内容块懒加载阅读、受控回修、Word导出和图片规划Excel导出。每个Word批次必须先写入符合协议的`source/batch-NN.json`，再由`scripts/bid_delivery_ui/export_word.py`生成Word、执行本地结构校验并登记哈希；登记后批次必然进入`ai_rechecking`，不得把聊天文本或旧Word直接当成权威稿。
+当前生产与审校台已支持交付总览、批次导航、带原生滚动条的正文阅读、受控回修、Word导出和图片规划Excel导出。阅读器按内容块懒加载；用户在中间正文面板向下滚动即可继续载入，不需要反复点击“展开更多内容”。每个Word批次必须先写入符合协议的`source/batch-NN.json`，再由`scripts/bid_delivery_ui/export_word.py`生成Word、执行本地结构校验并登记哈希；页数不足时先用`--preview`集中补足，达到登记门槛后才进入`ai_rechecking`。
 
-**AI复校是人工审阅前的硬闸门：** 当前AI必须在每次Word导出登记后完整读取项目内`bid_delivery/stage4-writing-rules.md`、本批结构化源稿、Word和`results/word-batch-NN-validation.json`，重新核对规则硬约束、项目事实、阶段2一至三级骨架、评分覆盖、完全或近似重复段落、跨批术语与成果衔接、Word格式和页数预算。建议先运行`python3 scripts/bid_delivery_ui/create_ai_recheck_template.py <project_dir> --batch <batch_id>`生成绑定当前项目、批次、规则、源稿和Word摘要的模板；AI只填写检查结论，不手抄64位SHA。报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`；每个问题都要写明位置、证据和处理建议，不能只写“已检查”。将完整报告写入临时JSON后，执行`python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> --batch <batch_id> --report <report.json>`。模板初始`status: running`不能直接提交，完成检查后必须改为`passed`或`failed`，并确认`rules_read: true`。只有`status: passed`且没有`blocking`问题才会开放网页正文和确认按钮；`failed`会退回`regenerating`，当前AI修复并重新导出、复校。任何人工操作和最终确认都不能绕过这个闸门。
+**AI复校是人工审阅前的硬闸门：** 当前AI必须在每批内容和临时页数估算达到登记门槛后正式导出Word，再登记并完整读取项目内`bid_delivery/stage4-writing-rules.md`、本批结构化源稿、Word和`results/word-batch-NN-validation.json`，重新核对规则硬约束、项目事实、阶段2一至三级骨架、评分覆盖、完全或近似重复段落、跨批术语与成果衔接、Word格式和页数预算。低于计划90%时按下方“页数是G4硬约束”集中补页；不得对每个小补丁都跑完整AI复校。
+
+每批只在内容和页数达到登记门槛后开始正式复校。先运行`python3 scripts/bid_delivery_ui/create_ai_recheck_template.py <project_dir> --batch <batch_id>`，用模板绑定当前项目、批次、Stage4授权、规则、源稿和Word摘要；AI只填写检查结论，不手抄或改写绑定字段。报告的`scope`必须包含`writing_rules`、`project_facts`、`outline_scoring`、`duplicate_control`、`cross_batch_consistency`、`word_export`和`page_budget`；每个问题都要写明位置、证据和处理建议，不能只写“已检查”。模板初始`status: running`不能直接提交，完成检查后必须改为`passed`或`failed`，并确认`rules_read: true`。
+
+正式登记前必须逐批运行报告预检：`python3 scripts/bid_delivery_ui/ai_recheck.py <project_dir> --batch <batch_id> --report <report.json> --validate-only`。只有预检返回`status: validated`并列出已核对的`project_id`、`batch_id`、`batch_order`、授权摘要、`source_sha256`、`export_sha256`和`writing_rules_sha256`后，才运行同一命令但去掉`--validate-only`正式登记。登记返回`report_status: passed`且`batch_status: ready_for_review`时，才把本批开放给用户；若返回`report_status: failed`且`batch_status: regenerating`，立即修复并重导出该批，再重新预检和复校。每个批次都要在进入审校等待前完成此流程，不能把报告留到末批或最终交付时才集中登记。服务端还会在正式登记和用户确认时再次校验这些字段与当前文件，任何缺失或不匹配都会当场阻断。任何人工操作和最终确认都不能绕过这个闸门。
 
 正文生成采用“目录先行、深度优先”的顺序：先按已确认的一至三级骨架建立本批标题树，再填充正文。页数不足时，严格按“扩展已有段落（讲透方法、步骤、角色、边界、验证和成果）→在已有三级标题下挂靠四级标题→必要时挂靠更深层标题→补充适合的表格或列表”执行。禁止追加无父级的独立模块、用空泛段落或靠连续增加标题凑页。每个新增标题都要能回答：它是否是真实子主题、是否能写出至少两块有逻辑的支撑内容、删除后原章节是否不完整。
 
 生产校验会拒绝：三级标题未挂靠父级、四级及以下标题没有足够正文支撑、同一二级标题下超过7个三级标题、同一三级标题下超过7个四级标题，以及阶段2确认骨架被正文静默改写。低密度提示只用于提醒AI优先扩展已有内容，不自动要求把每个标题拆成相同数量的下级标题。
 
-**页数是G4硬约束：** 以阶段2确认的各章页数预算和阶段4批次计划页数组织正文，不能只把计划页数作为元数据。每章应以评分权重、场景、流程、责任、SLA、风险、验收、表格和图片占位形成实质内容；不得用重复句、空泛承诺或无关段落凑页。导出前必须读取本地校验中的预计页数；若低于该批计划页数的90%，只扩充内容不足的章节后重新导出，不得登记为待审校。预计页数仅用于发现源稿偏薄，最终页数以WPS打开Word后的实际结果为准。
+**页数是G4硬约束：** 以阶段2确认的各章页数预算和阶段4批次计划页数组织正文，不能只把计划页数作为元数据。每章应以评分权重、场景、流程、责任、SLA、风险、验收、表格和图片占位形成实质内容；不得用重复句、空泛承诺或无关段落凑页。首次源稿明显偏薄时，先集中扩充多个内容不足的章节，再运行临时页数检查；低于计划90%期间只做本地结构/事实边界检查和临时Word估算，不登记AI复校，也不逐个小补丁进行完整AI审校。可用`python3 scripts/bid_delivery_ui/export_word.py <project_dir> --batch <batch_id> --preview`临时渲染并读取估算，不写入正式Word、不改变批次状态。集中补充后达到至少90%且本地硬检查通过，才进行正式导出登记和一次完整AI复校；目标是进入已确认的页数区间，通常优先瞄准计划页数95%至110%。预计页数仅用于发现源稿偏薄，最终页数以WPS打开Word后的实际结果为准。
 
 **页数审校迭代：** 每批确认交付后，审校台会显示页数校验区。导出器已经给出AI预计页数且预计值在计划页数`±10%`内时，用户查看Word后无需填写实际页数即可继续交付；只有用户发现WPS实际页数不足或超出时，才填写实际页数。服务会将WPS实际页数与本批原始预计页数写入项目级校准记录，后续批次自动使用该项目的实测比例修正预计页数；校准只改善预判，不替代WPS最终事实。服务会自动撤销该批“已交付”状态，生成`revision`事件并明确要求“扩充”或“压缩”，当前AI必须读取事件，执行`python3 scripts/bid_delivery_ui/begin_revision.py <project_dir> --batch <batch_id>`，针对章节实质性修改、重新导出并再次登记。若事件标记`replan_required: true`，必须先复核本批目录和章节粒度，禁止直接连续追加独立模块；需要改变一至三级骨架时回到阶段2确认。重新交付的文件名依次增加`—审校版1`、`—审校版2`等后缀，用户可重复审阅，直到确认最终版本。
 
